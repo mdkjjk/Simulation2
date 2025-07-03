@@ -39,8 +39,8 @@ operate(qC, ns.Y)
 operate([qC, qA], ns.CX)
 operate([qD, qB], ns.CX)
 # 各サイドで、ターゲットビットをZ軸で測定
-ma = measure(qA)
-mb = measure(qB)
+ma = measure(qA, discard=True)
+mb = measure(qB, discard=True)
 
 if(ma[0] == mb[0]):  # 測定結果が一致する場合
     operate(qC, ns.Y)                         # Aliceサイドで、σ_y回転ゲートを制御ビットに適用 => 主成分を|Ψ⁻⟩(Werner状態)に戻す
@@ -48,5 +48,6 @@ if(ma[0] == mb[0]):  # 測定結果が一致する場合
     print(fidelity([qC, qD], ketstates.b11))  # 精製後の忠実度(>初期忠実度)
 else:                # 測定結果が不一致の場合
     print("not match")
-    discard(qC)  # 両サイドの制御ビットを破棄
+    # 両サイドの制御ビットを破棄
+    discard(qC)
     discard(qD)
