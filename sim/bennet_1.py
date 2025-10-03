@@ -14,11 +14,11 @@ def create_bell_state():
     assign_qstate(qB, ketstates.s1)  # |1⟩
     operate(qA, ns.H)                # Hadamard on qA
     operate([qA, qB], ns.CX)         # CNOT
-    operate(qA, ns.Z)                # To get |Ψ⁻⟩ from |Φ⁺⟩
+    operate(qA, ns.Z)                # To get |Ψ⁻⟩ from |Ψ⁺⟩
     return qA, qB
 
 # Werner状態の作成
-def create_werner_state(fidelity=0.7):
+def create_werner_state(fidelity):
     qA, qB = create_bell_state()
     p = 4/3 * (1 - fidelity)               # 脱分極が起きる確率
     noise_model = DepolarNoiseModel(depolar_rate=p, time_independent=True)
@@ -26,8 +26,8 @@ def create_werner_state(fidelity=0.7):
     return qA, qB
 
 # Werner状態のペアを２つ用意
-qA, qB = create_werner_state(fidelity=0.9)
-qC, qD = create_werner_state(fidelity=0.9)
+qA, qB = create_werner_state(fidelity=0.82)
+qC, qD = create_werner_state(fidelity=0.82)
 print(qubitapi.reduced_dm([qC, qD]))
 print(fidelity([qC, qD], ketstates.b11))    # 初期忠実度
 

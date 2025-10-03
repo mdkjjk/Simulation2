@@ -32,7 +32,7 @@ def bennet_epp(qubits, itteration):
         print("Phase {}".format(itteration))
         q_a1, q_b1 = create_werner_state(fidelity=0.8)
         q_a2, q_b2 = create_werner_state(fidelity=0.8)
-        print(fidelity([q_a2, q_b2], ketstates.b11))
+        print(fidelity([q_a2, q_b2], ketstates.b11))     # 初期エンタングルメント忠実度
 
         operate(q_a1, ns.Y)
         operate(q_a2, ns.Y)
@@ -44,7 +44,7 @@ def bennet_epp(qubits, itteration):
 
         if (ma[0] == mb[0]):
             operate(q_a2, ns.Y)
-            print(fidelity([q_a2,q_b2], ketstates.b11))
+            print(fidelity([q_a2,q_b2], ketstates.b11))  # 精製後のエンタングルメント忠実度
         else:
             print("FAIL")
             discard(q_a2)
