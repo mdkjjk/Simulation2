@@ -26,8 +26,8 @@ def create_werner_state(fidelity):
     return qA, qB
 
 # Werner状態のペアを２つ用意
-qA, qB = create_werner_state(fidelity=0.82)
-qC, qD = create_werner_state(fidelity=0.82)
+qA, qB = create_werner_state(fidelity=0.9)
+qC, qD = create_werner_state(fidelity=0.9)
 print(qubitapi.reduced_dm([qC, qD]))
 print(fidelity([qC, qD], ketstates.b11))    # 初期忠実度
 
