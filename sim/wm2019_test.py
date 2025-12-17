@@ -14,8 +14,12 @@ from netsquid.qubits.qformalism import QFormalism
 def hermitian(arr):
     return np.conjugate(arr.T)
 
+def fidelity_culc(qin, qout):
+    fid = np.trace(np.dot(qin, qout))
+    return np.abs(fid)
+    
 # phase dampingのKraus演算子
-p = 0.8   # 減衰率
+p = 0.5   # 減衰率
 e1 = [[1, 0],[0, np.sqrt(1-p)]]
 e2 = [[0, 0],[0, np.sqrt(p)]]
 E1 = ops.Operator("E1", e1)
@@ -33,6 +37,8 @@ print(ns.qubits.reduced_dm(q))
 # noiseが作用した後のqubitの状態
 qd = E1.arr @ ns.qubits.reduced_dm(q) @ E1t + E2.arr @ ns.qubits.reduced_dm(q) @ E2t
 print(qd)
+fid1 = fidelity_culc(ns.qubits.reduced_dm(q), qd)
+print(fid1)
 
 # 測定演算子
 theta = 0.3   # 測定強度
@@ -64,5 +70,5 @@ qc = Ryp.arr @ mzp.arr @ qd @ hermitian(mzp.arr) @ hermitian(Ryp.arr) + Rym.arr 
 print(qc)
 print(ns.qubits.reduced_dm(q))
 # 忠実度
-fid = fidelity(q, qc)
-print(fid)
+fid2 = fidelity_culc(ns.qubits.reduced_dm(q), qc)
+print(fid2)
