@@ -4,7 +4,7 @@ from netsquid.qubits import set_qstate_formalism, QFormalism
 from netsquid.qubits import create_qubits, operate, ketstates, StateSampler
 from netsquid.qubits import qubitapi
 from netsquid.qubits import operators as ops
-from netsquid.qubits.ketstates import s0, b00
+from netsquid.qubits.ketstates import s0, b00, y0
 from netsquid.qubits.ketutil import outerprod
 from netsquid.qubits.qubitapi import assign_qstate, measure, gmeasure, amplitude_dampen, fidelity
 from netsquid.qubits.qformalism import QFormalism
@@ -40,7 +40,7 @@ qa, qb = create_bell_state()
 print(ns.qubits.reduced_dm([qa, qb]))
 
 # 測定演算子(wm)
-omega = np.pi / 6   # 測定強度
+omega = np.pi / 3   # 測定強度
 m0 = [[np.cos(omega/2), 0], [0, np.sin(omega/2)]]
 m1 = [[np.sin(omega/2), 0], [0, np.cos(omega/2)]]
 M0 = ops.Operator("M0", m0)
@@ -55,7 +55,7 @@ E0 = ops.Operator("E0", e0)
 E1 = ops.Operator("E1", e1)
 
 # 測定演算子(wmr)
-theta = 0.6
+theta = 0.3
 n0 = [[theta, 0], [0, 1]]
 n0_ = [[np.sqrt(1-theta*theta), 0], [0, 0]]
 n1 = [[1, 0], [0, theta]]
@@ -97,3 +97,16 @@ assign_qstate([q1, q2], b00)
 amplitude_dampen(q2, gamma=0.8, prob=1)
 print(fidelity([qa, qb], b00))
 print(fidelity([q1, q2], b00))
+
+# テレポーテーション
+q, = create_qubits(1)
+assign_qstate(q, y0)
+tresult = tele_alice(q, qa)
+qout = tele_bob(tresult[0][0], tresult[1][0], qb)
+print(fidelity(qout, y0))
+
+qt, = create_qubits(1)
+assign_qstate(qt, y0)
+ttresult = tele_alice(qt, q1)
+qtout = tele_bob(ttresult[0][0], ttresult[1][0], q2)
+print(fidelity(qtout, y0))
