@@ -7,8 +7,8 @@ from netsquid.qubits import operators as ops
 from netsquid.qubits.ketstates import s0, b00, y0
 from netsquid.qubits.ketutil import outerprod
 from netsquid.qubits.qubitapi import assign_qstate, measure, gmeasure, amplitude_dampen, fidelity
-from netsquid.qubits.qformalism import QFormalism
-from netsquid.components.models import T1T2NoiseModel
+
+set_qstate_formalism(QFormalism.DM)
 
 # Bell状態の作成
 def create_bell_state():
@@ -95,6 +95,7 @@ print(ns.qubits.reduced_dm([qa, qb]))
 q1, q2 = create_qubits(2)
 assign_qstate([q1, q2], b00)
 amplitude_dampen(q2, gamma=0.8, prob=1)
+print(ns.qubits.reduced_dm([q1, q2]))
 print(fidelity([qa, qb], b00))
 print(fidelity([q1, q2], b00))
 
