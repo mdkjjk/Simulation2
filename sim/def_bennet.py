@@ -28,32 +28,38 @@ def create_werner_state(fidelity=0.7):
 # 課題：失敗したときの条件分岐を整理すること
 def bennet_epp(qubits, itteration):
     itteration += 1
-    if (itteration == 1):
+    if (itteration == 1): # 1回目の場合
         print("Phase {}".format(itteration))
-        q_a1, q_b1 = create_werner_state(fidelity=0.8)
+        q_a1, q_b1 = create_werner_state(fidelity=0.8)   # ペアの共有
         q_a2, q_b2 = create_werner_state(fidelity=0.8)
+        print("Before: ")
         print(fidelity([q_a2, q_b2], ketstates.b11))     # 初期エンタングルメント忠実度
 
+        # Aliceのみ回転操作
         operate(q_a1, ns.Y)
         operate(q_a2, ns.Y)
+        # 両者でCNOTゲート
         operate([q_a2, q_a1], ns.CX)
         operate([q_b2, q_b1], ns.CX)
-
+        # 両者でターゲットビットをz軸で測定
         ma = measure(q_a1, discard=True)
         mb = measure(q_b1, discard=True)
 
-        if (ma[0] == mb[0]):
+        if (ma[0] == mb[0]): # 測定結果が一致する場合
+            # Aliceのみ回転操作
             operate(q_a2, ns.Y)
+            print("After: ")
             print(fidelity([q_a2,q_b2], ketstates.b11))  # 精製後のエンタングルメント忠実度
-        else:
+        else: # 測定結果が不一致の場合
             print("FAIL")
-            discard(q_a2)
+            discard(q_a2)   # ペアを破棄
             discard(q_b2)
             qp_a, qp_b = bennet_epp(None, 0)
 
         return q_a2, q_b2
     else:
         print("Phase {}".format(itteration))
+        print("Before: ")
         print(fidelity([qubits[2], qubits[3]], ketstates.b11))
         print(qubitapi.reduced_dm([qubits[2], qubits[3]]))
 
@@ -67,6 +73,7 @@ def bennet_epp(qubits, itteration):
 
         if (ma[0] == mb[0]):
             operate(qubits[2], ns.Y)
+            print("After: ")
             print(fidelity([qubits[2], qubits[3]], ketstates.b11))
             print(qubitapi.reduced_dm([qubits[2], qubits[3]]))
         else:
