@@ -16,7 +16,7 @@ from netsquid.nodes.node import Node
 from netsquid.nodes.network import Network
 from netsquid.nodes.connections import DirectConnection
 from netsquid.components import ClassicalChannel, QuantumChannel
-from netsquid.components.instructions import INSTR_MEASURE, INSTR_CNOT, IGate
+from netsquid.components.instructions import INSTR_MEASURE, INSTR_CNOT, INSTR_Y
 from netsquid.components.component import Message, Port
 from netsquid.components.qsource import QSource, SourceStatus
 from netsquid.components.qprocessor import QuantumProcessor
@@ -53,7 +53,8 @@ def network_setup(source_delay=1e5, source_fidelity_sq=0.8, fidelity=0.7, node_d
     conn_cchannel = DirectConnection("CChannelConn_AB",
         ClassicalChannel("CChannel_A->B", length=node_distance, models={"delay_model": FibreDelayModel(c=200e3)}),
         ClassicalChannel("CChannel_B->A", length=node_distance, models={"delay_model": FibreDelayModel(c=200e3)}))
-    network.add_connection(node_a, node_b, connection=conn_cchannel)
+    network.add_connection(node_a, node_b, connection=conn_cchannel,
+                           port_name_node1="cout_bob", port_name_node2="cin_alice")
     p = 4/3 * (1 - fidelity)
     qchannel = QuantumChannel("QChannel_A->B", length=node_distance,
                               models={"quantum_noise_model": DepolarNoiseModel(depolar_rate=p, time_independent=True),
@@ -92,6 +93,34 @@ def sim_setup(node_a, node_b, num_runs):
     be_example = BennetExample(node_a, node_b, num_runs=num_runs)
     return be_example
 
+class RotateProgram(QuantumProgram):
+    default_num_qubits = 2
+
+    def program(self):
+        q1, q2 = self.get_qubit_indices(2)
+        self.apply(instr.INSTR_Y, q1)
+        self.apply(instr.INSTR_Y, q2)
+        yield self.run()
+
+class MeasurementProgram(QuantumProgram):
+    default_num_qubits = 2
+
+    def program(self):
+        q1, q2 = self.get_qubit_indices(2)
+        self.apply(instr.INSTR_CNOT, [q2, q1])
+        self.apply(instr.INSTR_MEASURE, q1, output_key="M")
+        yield self.run()
+
+class MeasurementProtocol(NodeProtocol):
+    def run(self):
+        rotate_program = RotateProgram()
+        measure_program = MeasurementProgram()
+        if self.node.name = "node_A":
+            self.node.qmemory.execute_program(rotate_program)
+        self.node.qmemory.execute_program(measure_program)
+        m, = measure_program.output["M"][0]
+
+
 network = network_setup()
 node_a = network.get_node("node_A")
 node_b = network.get_node("node_B")
@@ -105,23 +134,3 @@ qd, = node_b.qmemory.peek(positions=[1])
 print(qapi.reduced_dm([qa, qb]))
 print(fidelity([qa, qb], ketstates.b11))
 
-# Aliceサイドで、σ_y回転ゲートを各ペアに適用 => |Φ⁺⟩が主成分になる
-operate(qa, ns.Y)
-operate(qc, ns.Y)
-
-# 各サイドで、CNOTゲートを適用
-operate([qc, qa], ns.CX)
-operate([qd, qb], ns.CX)
-# 各サイドで、ターゲットビットをZ軸で測定
-ma = measure(qa, discard=True)
-mb = measure(qb, discard=True)
-
-if(ma[0] == mb[0]):  # 測定結果が一致する場合
-    operate(qc, ns.Y)                         # Aliceサイドで、σ_y回転ゲートを制御ビットに適用 => 主成分を|Ψ⁻⟩(Werner状態)に戻す
-    print(qapi.reduced_dm([qc, qd]))
-    print(fidelity([qc, qd], ketstates.b11))  # 精製後の忠実度(>初期忠実度)
-else:                # 測定結果が不一致の場合
-    print("not match")
-    # 両サイドの制御ビットを破棄
-    discard(qc)
-    discard(qd)
