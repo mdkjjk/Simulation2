@@ -72,65 +72,91 @@ def network_setup(source_delay=1e5, source_fidelity_sq=0.8, fidelity=0.7, node_d
     return network
 
 class BennetExample(LocalProtocol):
-    def __init__(self, node_a, node_b, num_runs):
+    def __init__(self, node_a, node_b):
         super().__init__(nodes={"A": node_a, "B": node_b}, name="Bennet example")
-        self.num_runs = num_runs
+        #self.num_runs = num_runs
 
         self.add_subprotocol(EntangleNodes(node=node_a, role="source", input_mem_pos=0,
                                            num_pairs=2, name="entangle_A"))
         self.add_subprotocol(EntangleNodes(node=node_b, role="receiver", input_mem_pos=0,
                                            num_pairs=2, name="entangle_B"))
+        
+        self.add_subprotocol(MeasurementProtocol(node_a, node_a.ports["cout_bob"], role="A", name="bennet_A"))
+        self.add_subprotocol(MeasurementProtocol(node_b, node_b.ports["cin_alice"], role="B", name="bennet_B"))
 
         self.subprotocols["entangle_A"].start_expression = (self.subprotocols["entangle_A"].await_signal(
                                 self, Signals.WAITING))
+        self.subprotocols["bennet_A"].start_expression = (
+            self.subprotocols["bennet_A"].await_signal(self.subprotocols["entangle_A"],
+                                                       Signals.SUCCESS))
+        self.subprotocols["bennet_B"].start_expression = (
+            self.subprotocols["bennet_B"].await_signal(self.subprotocols["entangle_B"],
+                                                       Signals.SUCCESS))
     
     def run(self):
         self.start_subprotocols()
         self.subprotocols["entangle_A"].entangled_pairs = 0
         self.send_signal(Signals.WAITING)
 
-def sim_setup(node_a, node_b, num_runs):
-    be_example = BennetExample(node_a, node_b, num_runs=num_runs)
+def sim_setup(node_a, node_b):
+    be_example = BennetExample(node_a, node_b)
     return be_example
 
-class RotateProgram(QuantumProgram):
-    default_num_qubits = 2
-
-    def program(self):
-        q1, q2 = self.get_qubit_indices(2)
-        self.apply(instr.INSTR_Y, q1)
-        self.apply(instr.INSTR_Y, q2)
-        yield self.run()
-
-class MeasurementProgram(QuantumProgram):
-    default_num_qubits = 2
-
-    def program(self):
-        q1, q2 = self.get_qubit_indices(2)
-        self.apply(instr.INSTR_CNOT, [q2, q1])
-        self.apply(instr.INSTR_MEASURE, q1, output_key="M")
-        yield self.run()
-
 class MeasurementProtocol(NodeProtocol):
-    def run(self):
-        rotate_program = RotateProgram()
-        measure_program = MeasurementProgram()
-        if self.node.name = "node_A":
-            self.node.qmemory.execute_program(rotate_program)
-        self.node.qmemory.execute_program(measure_program)
-        m, = measure_program.output["M"][0]
+    def __init__(self, node, port, role, start_expression=None, msg_header="bennet", name=None):
+        name = name if name else "BennetNode({}, {})".format(node.name, port.name)
+        super().__init__(node, name=name)
+        self.port = port
+        self.role = role
+        self._rotprog = self._rotate_program()
+        self._measprog = self._measure_program()
+        self.local_meas_result = None
+        self.remote_meas_result = None
+        self.header = msg_header
+        self._qmem_positions = [None, None]
 
+    def _rotate_program(self):
+        prog = QuantumProgram(num_qubits=2)
+        q1, q2 = prog.get_qubit_indices(2)
+        prog.apply(INSTR_Y, [q1])
+        prog.apply(INSTR_Y, [q2])
+        return prog
+    
+    def _measure_program(self):
+        prog = QuantumProgram(num_qubits=2)
+        q1, q2 = prog.get_qubit_indices(2)
+        prog.apply(INSTR_CNOT, [q2, q1])
+        prog.apply(INSTR_MEASURE, q1, output_key="M")
+        return prog
+
+    def run(self):
+        if self.role.upper() == "A":
+            self.node.qmemory.execute_program(self._rotprog, [0, 1])
+        self.node.qmemory.execute_program(self._measprog, [0, 1])
+        self.local_meas_result = self._measprog.output["M"][0]
+        self.port.tx_output(Message(self.local_meas_result, header=self.header))
+        yield self.await_port_input(self.port)
+        classical_message = self.port.rx_input(header=self.header)
+        if classical_message:
+            self.remote_meas_result = classical_message.items
+        self._check_success()
+        
+    def _check_success(self):
+        if self.local_meas_result == self.remote_meas_result:
+            print("SUCCESS")
+        else:
+            print("FAIL")
+        self.local_meas_result = None
+        self.remote_meas_result = None
 
 network = network_setup()
-node_a = network.get_node("node_A")
-node_b = network.get_node("node_B")
-be_example = sim_setup(node_a, node_b, num_runs=1)
+be_example = sim_setup(network.get_node("node_A"), network.get_node("node_B"))
 be_example.start()
-ns.sim_run(1e10)
-qa, = node_a.qmemory.peek(positions=[0])
-qb, = node_b.qmemory.peek(positions=[0])
-qc, = node_a.qmemory.peek(positions=[1])
-qd, = node_b.qmemory.peek(positions=[1])
-print(qapi.reduced_dm([qa, qb]))
-print(fidelity([qa, qb], ketstates.b11))
+ns.sim_run()
+#qa, = node_a.qmemory.peek(positions=[0])
+#qb, = node_b.qmemory.peek(positions=[0])
+#qc, = node_a.qmemory.peek(positions=[1])
+#qd, = node_b.qmemory.peek(positions=[1])
+#print(qapi.reduced_dm([qa, qb]))
+#print(fidelity([qa, qb], ketstates.b11))
 
