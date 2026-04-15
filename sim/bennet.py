@@ -118,7 +118,6 @@ class Bennet(NodeProtocol):
             assert memory_position != self._qmem_positions[0]
             self._qmem_positions[1] = memory_position
             self._waiting_on_second_qubit = False
-            print(qapi.reduced_dm(self.node.qmemory.peek([self._qmem_positions[0]])))
             yield from self._node_do_bennet()
         # 1つ目のエンタングルメントが到着した場合
         else:
@@ -140,7 +139,8 @@ class Bennet(NodeProtocol):
         if self.role.upper() == "A":
             yield self.node.qmemory.execute_program(self._rotprog, [pos1, pos2])
         yield self.node.qmemory.execute_program(self._measprog, [pos1, pos2])
-        yield self.node.qmemory.execute_program(self._reprog, [pos2])
+        if self.role.upper() == "A":
+            yield self.node.qmemory.execute_program(self._reprog, [pos2])
         self.local_meas_result = self._measprog.output["M"][0]
         self._qmem_positions[0] = None
         self.port.tx_output(Message([self.local_qcount, self.local_meas_result],
@@ -173,7 +173,7 @@ class Bennet(NodeProtocol):
             return False
         return True
 
-def network_setup(source_delay=1e5, source_fidelity_sq=0.9, fidelity=0.8, node_distance=100):
+def network_setup(source_delay=1e5, source_fidelity_sq=0.9, fidelity=0.8, node_distance=1000):
     network = Network("bennet_network")
 
     # ノード設定
@@ -264,6 +264,7 @@ def sim_setup(node_a, node_b, num_runs):
         # Record fidelity
         q_A, = node_a.qmemory.pop(positions=[result["pos_A"]])
         q_B, = node_b.qmemory.pop(positions=[result["pos_B"]])
+        print(qapi.reduced_dm([q_A, q_B]))
         f2 = qapi.fidelity([q_A, q_B], ks.b11, squared=True)
         return {"F2": f2, "pairs": result["pairs"], "time": result["time"]}
 
