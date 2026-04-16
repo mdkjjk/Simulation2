@@ -26,8 +26,7 @@ from netsquid.components.models import DepolarNoiseModel
 from netsquid.nodes.connections import DirectConnection
 from pydynaa import EventExpression
 
-print("This example module is located at: "
-      "{}".format(ns.examples.entanglenodes.__file__))
-print("This example module is located at: {}".format(
-      ns.examples.teleportation.__file__))
-print("This example module is located at: {}".format(ns.examples.purify.__file__))
+#print("This example module is located at: {}".format(ns.examples.entanglenodes.__file__))
+#print("This example module is located at: {}".format(ns.examples.teleportation.__file__))
+#print("This example module is located at: {}".format(ns.examples.purify.__file__))
+print("This example module is located at: {}".format(ns.qubits.qubitapi.__file__))
