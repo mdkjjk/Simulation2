@@ -2,14 +2,14 @@ import numpy as np
 import netsquid as ns
 import pydynaa as pd
 import pandas
+import matplotlib, os
+from matplotlib import pyplot as plt
 
 from netsquid.qubits import operators as ops
 from netsquid.qubits import qubitapi as qapi
 from netsquid.qubits import ketstates as ks
-from netsquid.qubits import create_qubits, operate
-from netsquid.qubits.qubitapi import assign_qstate, measure, fidelity, discard
-from netsquid.qubits.ketutil import outerprod
-from netsquid.qubits.ketstates import s0, s1, s00, b11
+from netsquid.qubits.qubitapi import fidelity, discard
+from netsquid.qubits.ketstates import s00, b11
 from netsquid.qubits.state_sampler import StateSampler
 from netsquid.qubits.qformalism import QFormalism
 from netsquid.qubits.dmtools import DenseDMRepr
@@ -34,7 +34,7 @@ from pydynaa import EventExpression
 ns.set_qstate_formalism(QFormalism.DM)
 
 class Bennet(NodeProtocol):
-    def __init__(self, node, port, role, start_expression=None, msg_header="bennet", name=None):
+    def __init__(self, node, port, role, start_expression=None, msg_header="bennet", name=None):   # 初期化
         if role.upper() not in ["A", "B"]:
             raise ValueError
         if not isinstance(port, Port):
@@ -56,42 +56,45 @@ class Bennet(NodeProtocol):
         if start_expression is not None and not isinstance(start_expression, EventExpression):
             raise TypeError("Start expression should be a {}, not a {}".format(EventExpression, type(start_expression)))
 
-    def _rotate_program(self):
+    def _rotate_program(self):   # 回転操作（Aliceのみ）
         prog = QuantumProgram(num_qubits=2)
         q1, q2 = prog.get_qubit_indices(2)
         prog.apply(INSTR_Y, [q1])
         prog.apply(INSTR_Y, [q2])
         return prog
     
-    def _measure_program(self):
+    def _measure_program(self):   # 測定（Alice & Bob）
         prog = QuantumProgram(num_qubits=2)
         q1, q2 = prog.get_qubit_indices(2)
         prog.apply(INSTR_CNOT, [q2, q1])
         prog.apply(INSTR_MEASURE, q1, output_key="M", inplace=False)
         return prog   # 測定結果をreturn
 
-    def _reverse_program(self):
+    def _reverse_program(self):   # 逆回転（Aliceのみ）
         prog = QuantumProgram(num_qubits=1)
         q1, = prog.get_qubit_indices(1)
         prog.apply(INSTR_Y, q1)
         return prog
 
     def run(self):
-        print(f"{self.name}:Start")
+        #print(f"{self.name}:Start")
         cchannel_ready = self.await_port_input(self.port)
         qmemory_ready = self.start_expression
         while True:
             expr = yield cchannel_ready | qmemory_ready
+            # 測定結果を受信した場合
             if expr.first_term.value:
                 classical_message = self.port.rx_input(header=self.header)
-                print(f"{self.name}:result received")
+                #print(f"{self.name}:result received")
                 if classical_message:
                     self.remote_qcount, self.remote_meas_result = classical_message.items
+            # エンタングルメントを受信した場合
             elif expr.second_term.value:
                 source_protocol = expr.second_term.atomic_source
+                # エンタングルメントが保存されたメモリポジションを取得
                 ready_signal = source_protocol.get_signal_by_event(
-                    event=expr.second_term.triggered_events[0], receiver=self) # エンタングルメントが保存されたメモリポジションを取得
-                print(f"{self.name}: Entanglement received at {ready_signal.result} / time: {sim_time()}")
+                    event=expr.second_term.triggered_events[0], receiver=self)
+                #print(f"{self.name}: Entanglement received at {ready_signal.result} / time: {sim_time()}")
                 yield from self._handle_new_qubit(ready_signal.result)
             self._check_success()
     
@@ -104,7 +107,7 @@ class Bennet(NodeProtocol):
         self._waiting_on_second_qubit = False
         return super().start()
 
-    def _clear_qmem_positions(self): # 失敗した場合、エンタングルメントを破棄
+    def _clear_qmem_positions(self):   # 失敗した場合、エンタングルメントを破棄
         positions = [pos for pos in self._qmem_positions if pos is not None]
         if len(positions) > 0:
             self.node.qmemory.pop(positions=positions)
@@ -132,7 +135,7 @@ class Bennet(NodeProtocol):
             self.local_meas_result = None
             self._waiting_on_second_qubit = True
 
-    def _node_do_bennet(self):
+    def _node_do_bennet(self):   # 精製処理
         pos1, pos2 = self._qmem_positions
         if self.node.qmemory.busy:
             yield self.await_program(self.node.qmemory)
@@ -146,17 +149,17 @@ class Bennet(NodeProtocol):
         self.port.tx_output(Message([self.local_qcount, self.local_meas_result],
                                     header=self.header))
         
-    def _check_success(self):
+    def _check_success(self):   # 測定結果の比較
         if (self.local_qcount == self.remote_qcount and
                 self.local_meas_result is not None and
                 self.remote_meas_result is not None):
             if self.local_meas_result == self.remote_meas_result:
                 self.send_signal(Signals.SUCCESS, self._qmem_positions[1])
-                print(f"{self.name}: SUCCESS / time: {sim_time()}")
+                #print(f"{self.name}: SUCCESS / time: {sim_time()}")
             else:
                 self._clear_qmem_positions()
                 self.send_signal(Signals.FAIL, self.local_qcount)
-                print(f"{self.name}: FAIL / time: {sim_time()}")
+                #print(f"{self.name}: FAIL / time: {sim_time()}")
             self.local_meas_result = None
             self.remote_meas_result = None
             self._qmem_positions = [None, None]
@@ -180,8 +183,6 @@ def network_setup(source_delay=1e5, source_fidelity_sq=0.9, fidelity=0.8, node_d
     node_a, node_b = network.add_nodes(["node_A", "node_B"])
     node_a.add_subcomponent(QuantumProcessor("QuantumMemory_A", num_positions=11,
         fallback_to_nonphysical=True))   # パラメータ「memory_noise_models」によりメモリ滞在によるノイズの影響を設定可能
-    #state = DenseDMRepr(np.array[[(1-f)/3, 0, 0, 0], [0, (2*f+1)/6, (1-4*f)/6, 0],
-                                 #[0, (1-4*f)/6, (2*f+1)/6, 0], [0, 0, 0, (1-f)/3]])   werner状態の密度行列
     state_sampler = StateSampler([ks.b11, ks.s00], probabilities=[source_fidelity_sq, 1 - source_fidelity_sq])
     source_frequency = 4e4 / node_distance
     node_a.add_subcomponent(QSource("QSource_A", state_sampler=state_sampler,
@@ -216,19 +217,19 @@ class BennetExample(LocalProtocol):
     def __init__(self, node_a, node_b, num_runs):
         super().__init__(nodes={"A": node_a, "B": node_b}, name="Bennet example")
         self.num_runs = num_runs
-
+        # エンタングルメント生成プロトコル
         self.add_subprotocol(EntangleNodes(node=node_a, role="source", input_mem_pos=0,
                                            num_pairs=2, name="entangle_A"))
         self.add_subprotocol(EntangleNodes(node=node_b, role="receiver", input_mem_pos=0,
                                            num_pairs=2, name="entangle_B"))
-        
+        # 精製処理プロトコル
         self.add_subprotocol(Bennet(node_a, node_a.ports["cout_bob"], role="A", name="bennet_A"))
         self.add_subprotocol(Bennet(node_b, node_b.ports["cin_alice"], role="B", name="bennet_B"))
-
+        # エンタングルメント生成プロトコルの開始条件
         self.subprotocols["entangle_A"].start_expression = (
             self.subprotocols["entangle_A"].await_signal(self.subprotocols["bennet_A"], Signals.FAIL) |
                              self.subprotocols["entangle_A"].await_signal(self, Signals.WAITING))
-                                
+        # 精製処理プロトコルの開始条件                        
         self.subprotocols["bennet_A"].start_expression = (
             self.subprotocols["bennet_A"].await_signal(self.subprotocols["entangle_A"],
                                                        Signals.SUCCESS))
@@ -264,7 +265,7 @@ def sim_setup(node_a, node_b, num_runs):
         # Record fidelity
         q_A, = node_a.qmemory.pop(positions=[result["pos_A"]])
         q_B, = node_b.qmemory.pop(positions=[result["pos_B"]])
-        print(qapi.reduced_dm([q_A, q_B]))
+        #print(qapi.reduced_dm([q_A, q_B]))
         f2 = qapi.fidelity([q_A, q_B], ks.b11, squared=True)
         return {"F2": f2, "pairs": result["pairs"], "time": result["time"]}
 
@@ -274,9 +275,42 @@ def sim_setup(node_a, node_b, num_runs):
                                      event_type=Signals.SUCCESS.value))
     return be_example, dc
 
+def run_experiment(node_distances):
+    fidelity_data = pandas.DataFrame()
+    for node_distance in node_distances:
+        ns.sim_reset()
+        network = network_setup(node_distance=node_distance)
+        node_a = network.get_node("node_A")
+        node_b = network.get_node("node_B")
+        be_example, dc = sim_setup(node_a, node_b, 100)
+        be_example.start()
+        ns.sim_run()
+        df = dc.dataframe
+        df['node_distance'] = node_distance
+        fidelity_data = pandas.concat([fidelity_data, df])
+    return fidelity_data
 
-network = network_setup()
-be_example, dc = sim_setup(network.get_node("node_A"), network.get_node("node_B"), num_runs=1)
-be_example.start()
-ns.sim_run()
-print("Average fidelity of generated entanglement with bennet: {}".format(dc.dataframe["F2"].mean()))
+def create_plot():
+    matplotlib.use('Agg')
+    node_distances = [1 + i for i in range(0, 100, 5)]
+    fidelities = run_experiment(node_distances)
+    plot_style = {'kind': 'scatter', 'grid': True,
+                'title': "Fidelity of the teleported quantum state with bennet"}
+    data = fidelities.groupby("node_distance")['F2'].agg(
+        fidelity='mean', sem='sem').reset_index()
+    save_dir = "./plots_test"
+    existing_files1 = len([f for f in os.listdir(save_dir) if f.startswith("Bennet fidelity")])
+    filename = f"{save_dir}/Bennet fidelity_{existing_files1 + 1}.png"
+    data.plot(x='node_distance', y='fidelity', yerr='sem', **plot_style)
+    plt.savefig(filename)
+    print(f"Plot saved as {filename}")
+    existing_files2 = len([f for f in os.listdir(save_dir) if f.startswith("Bennet result")])
+    fidelities.to_csv(f"{save_dir}/Bennet result_{existing_files2 + 1}.csv")
+
+if __name__ == "__main__":
+    #network = network_setup()
+    #be_example, dc = sim_setup(network.get_node("node_A"), network.get_node("node_B"), num_runs=1)
+    #be_example.start()
+    #ns.sim_run()
+    #print("Average fidelity of generated entanglement with bennet: {}".format(dc.dataframe["F2"].mean()))
+    create_plot()
