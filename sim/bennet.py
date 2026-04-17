@@ -176,7 +176,7 @@ class Bennet(NodeProtocol):
             return False
         return True
 
-def network_setup(source_delay=1e5, source_fidelity_sq=0.9, fidelity=0.8, node_distance=1000):
+def network_setup(source_delay=1e5, source_fidelity_sq=0.9, fidelity=0.7,depolar_rate=500, node_distance=1000):
     network = Network("bennet_network")
 
     # ノード設定
@@ -197,9 +197,10 @@ def network_setup(source_delay=1e5, source_fidelity_sq=0.9, fidelity=0.8, node_d
         ClassicalChannel("CChannel_B->A", length=node_distance, models={"delay_model": FibreDelayModel(c=200e3)}))
     network.add_connection(node_a, node_b, connection=conn_cchannel,
                            port_name_node1="cout_bob", port_name_node2="cin_alice")
-    p = 4/3 * (1 - fidelity)
+    #p = 4/3 * (1 - fidelity)
+    # DepolarNoiseModelのtime_independentは、True->理論値を確認できる　False->時間依存なので現実に近くなる
     qchannel = QuantumChannel("QChannel_A->B", length=node_distance,
-                              models={"quantum_noise_model": DepolarNoiseModel(depolar_rate=p, time_independent=True),
+                              models={"quantum_noise_model": DepolarNoiseModel(depolar_rate=depolar_rate, time_independent=False),
                                       "delay_model": FibreDelayModel(c=200e3)})
     port_name_a, port_name_b = network.add_connection(
         node_a, node_b, channel_to=qchannel, label="quantum")
@@ -292,7 +293,7 @@ def run_experiment(node_distances):
 
 def create_plot():
     matplotlib.use('Agg')
-    node_distances = [1 + i for i in range(0, 100, 5)]
+    node_distances = [1 + i for i in range(0, 1000, 100)]
     fidelities = run_experiment(node_distances)
     plot_style = {'kind': 'scatter', 'grid': True,
                 'title': "Fidelity of the teleported quantum state with bennet"}
