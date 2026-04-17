@@ -47,15 +47,8 @@ M0 = ops.Operator("M0", m0)
 M1 = ops.Operator("M1", m1)
 meas_ops = [M0, M1]
 
-# 振幅減衰のKraus演算子
-r = 0.6   # 減衰率
-e0 = [[1, 0], [0, np.sqrt(1-r)]]
-e1 = [[0, np.sqrt(r)], [0, 0]]
-E0 = ops.Operator("E0", e0)
-E1 = ops.Operator("E1", e1)
-
 # 測定演算子(wmr)
-theta = 0.3
+theta = 0.2
 n0 = [[theta, 0], [0, 1]]
 n0_ = [[np.sqrt(1-theta*theta), 0], [0, 0]]
 n1 = [[1, 0], [0, theta]]
@@ -69,7 +62,7 @@ wmr_ops1 = [N1, N1_]
 
 # 弱測定
 mresult = gmeasure(qb, meas_operators=meas_ops)
-print(mresult)
+#print(mresult)
 #print(ns.qubits.reduced_dm([qa, qb]))
 # フリップ操作
 if (mresult[0] == 1):
@@ -86,10 +79,14 @@ if (mresult[0] == 0):
     mrresult = gmeasure(qb, meas_operators=wmr_ops0)
     if (mrresult[0] == 1):
         print("FAIL")
+    else:
+        print("SUCCESS")
 else:
     mrresult = gmeasure(qb, meas_operators=wmr_ops1)
     if (mrresult[0] == 1):
         print("FAIL")
+    else:
+        print("SUCCESS")
 print(ns.qubits.reduced_dm([qa, qb]))
 
 q1, q2 = create_qubits(2)

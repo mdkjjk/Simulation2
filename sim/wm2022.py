@@ -9,7 +9,7 @@ from netsquid.qubits import operators as ops
 from netsquid.qubits import qubitapi as qapi
 from netsquid.qubits import ketstates as ks
 from netsquid.qubits.qubitapi import fidelity, discard
-from netsquid.qubits.ketstates import s00, b11
+from netsquid.qubits.ketstates import s00, b00
 from netsquid.qubits.state_sampler import StateSampler
 from netsquid.qubits.qformalism import QFormalism
 from netsquid.qubits.dmtools import DenseDMRepr
@@ -33,7 +33,47 @@ from pydynaa import EventExpression
 
 ns.set_qstate_formalism(QFormalism.DM)
 
-def network_setup(source_delay=1e5, source_fidelity_sq=0.9, fidelity=0.8, node_distance=1000):
+# 振幅減衰ノイズモデル
+class AmplitudeNoiseModel(QuantumErrorModel):
+    def __init__(self, gamma, time_independent=False, **kwargs):
+        super().__init__(**kwargs)
+        # NOTE time independence should be set *before* the rate
+        self.add_property('time_independent', time_independent, value_type=bool)
+
+        def gamma_constraint(value):
+            if self.time_independent and not 0 <= value <= 1:
+                return False
+            elif value < 0:
+                return False
+            return True
+        self.add_property('gamma', gamma,
+                          value_type=(int, float),
+                          value_constraints=ValueConstraint(gamma_constraint))
+    
+    @property
+    def gamma(self):
+        return self.properties['gamma']
+    
+    @gamma.setter
+    def gamma(self, value):
+        self.properties['gamma'] = value
+
+    @property
+    def time_independent(self):
+        """bool: Whether the probability of depolarizing is time independent."""
+        return self.properties['time_independent']
+
+    @time_independent.setter
+    def time_independent(self, value):
+        self.properties['time_independent'] = value
+    
+    def error_operation(self, qubits, delta_time=0, **kwargs):
+        if self.time_independent:
+            for qubit in qubits:
+                if qubit is not None:
+                    qapi.amplitude_dampen(qubit, gamma)
+
+def network_setup(source_delay=1e5, source_fidelity_sq=0.9, node_distance=1000):
     network = Network("bennet_network")
 
     # ノード設定
@@ -54,7 +94,7 @@ def network_setup(source_delay=1e5, source_fidelity_sq=0.9, fidelity=0.8, node_d
         ClassicalChannel("CChannel_B->A", length=node_distance, models={"delay_model": FibreDelayModel(c=200e3)}))
     network.add_connection(node_a, node_b, connection=conn_cchannel,
                            port_name_node1="cout_bob", port_name_node2="cin_alice")
-    p = 4/3 * (1 - fidelity)
+    # quantum_noise_modelに振幅減衰ノイズを指定
     qchannel = QuantumChannel("QChannel_A->B", length=node_distance,
                               models={"quantum_noise_model": DepolarNoiseModel(depolar_rate=p, time_independent=True),
                                       "delay_model": FibreDelayModel(c=200e3)})
