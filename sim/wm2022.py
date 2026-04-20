@@ -24,14 +24,29 @@ from netsquid.components.qprocessor import QuantumProcessor
 from netsquid.components.qprogram import QuantumProgram
 from netsquid.components.models import DepolarNoiseModel
 from netsquid.components.models.delaymodels import FixedDelayModel, FibreDelayModel
+from netsquid.components.models.qerrormodels import QuantumErrorModel
 from netsquid.protocols.protocol import Signals
 from netsquid.protocols.nodeprotocols import NodeProtocol, LocalProtocol
 from netsquid.util.simtools import sim_time
 from netsquid.util.datacollector import DataCollector
+from netsquid.util.constrainedmap import ValueConstraint
 from netsquid.examples.entanglenodes import EntangleNodes
 from pydynaa import EventExpression
 
 ns.set_qstate_formalism(QFormalism.DM)
+
+# 時間依存振幅減衰ノイズ
+def delay_amplitude_dampen(qubit, gamma, delay):
+    if gamma < 0:
+        raise ValueError(f"damp_rate {gamma} should be non-negative.")
+
+    # γ = 1 - exp(-Rt)
+    damp_rate = 1. - math.exp(- delay * gamma * 1e-9)
+
+    # 振幅減衰を適用
+    qapi.amplitude_dampen(qubit, damp_rate)
+
+    return damp_rate
 
 # 振幅減衰ノイズモデル
 class AmplitudeNoiseModel(QuantumErrorModel):
@@ -68,12 +83,16 @@ class AmplitudeNoiseModel(QuantumErrorModel):
         self.properties['time_independent'] = value
     
     def error_operation(self, qubits, delta_time=0, **kwargs):
-        if self.time_independent:
+        if self.time_independent:   # 時間非依存
             for qubit in qubits:
                 if qubit is not None:
                     qapi.amplitude_dampen(qubit, gamma)
+        else:                       # 時間依存
+            for qubit in qubits:
+                if qubit is not None:
+                    delay_amplitude_dampen(qubit, gamma=self.gamma, delay=delta_time)
 
-def network_setup(source_delay=1e5, source_fidelity_sq=0.9, node_distance=1000):
+def network_setup(source_delay=1e5, source_fidelity_sq=0.9, damp_rate=100, node_distance=1000):
     network = Network("bennet_network")
 
     # ノード設定
@@ -96,7 +115,7 @@ def network_setup(source_delay=1e5, source_fidelity_sq=0.9, node_distance=1000):
                            port_name_node1="cout_bob", port_name_node2="cin_alice")
     # quantum_noise_modelに振幅減衰ノイズを指定
     qchannel = QuantumChannel("QChannel_A->B", length=node_distance,
-                              models={"quantum_noise_model": DepolarNoiseModel(depolar_rate=p, time_independent=True),
+                              models={"quantum_noise_model": AmplitudeNoiseModel(gamma=damp_rate, time_independent=False),
                                       "delay_model": FibreDelayModel(c=200e3)})
     port_name_a, port_name_b = network.add_connection(
         node_a, node_b, channel_to=qchannel, label="quantum")
