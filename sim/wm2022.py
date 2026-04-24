@@ -149,22 +149,11 @@ class LocalEntangle(NodeProtocol):
             elif self.entangled_pairs >= self._num_pairs:
                 break
             self.node.subcomponents[self._qsource_name].trigger()
-            yield self.await_port_input(self._qin0)
-            yield self.await_port_input(self._qin1)
+            yield (self.await_port_input(self._qin0) | self.await_port_input(self._qin1))
             self.entangled_pairs += 1
-            self.send_signal(Signals.SUCCESS, mem_pos)
-
-    @property
-    def is_connected(self):
-        if not super().is_connected:
-            return False
-        if self.node.qmemory is None:
-            return False
-        if self._mem_positions is None and len(self.node.qmemory.unused_positions) < self._num_pairs - 1:
-            return False
-        if self._mem_positions is not None and len(self._mem_positions) != self._num_pairs:
-            return False
-        return True
+            result = {"mem_pos0": self._mem_pos0,
+                      "mem_pos1": self._mem_pos1,}
+            self.send_signal(Signals.SUCCESS, result)
 
 class WMeasure(NodeProtocol):   # Alice側のプロトコル
     def __init__(self, node, port, start_expression=None, msg_header="wmeasure", omega=np.pi/3, name=None):
@@ -328,6 +317,8 @@ class WMeasureExample(LocalProtocol):
         self.subprotocols["entangle_A"].entangled_pairs = 0
         self.send_signal(Signals.WAITING)
         yield self.await_signal(self.subprotocols["entangle_A"], Signals.SUCCESS)
+        mem = self.subprotocols["entangle_A"].get_signal_result(Signals.SUCCESS, self)
+        print(mem)
         self.send_signal(Signals.SUCCESS)
 
 def sim_setup(node_a, node_b, num_runs):
