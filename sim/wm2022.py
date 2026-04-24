@@ -92,6 +92,80 @@ class AmplitudeNoiseModel(QuantumErrorModel):
                 if qubit is not None:
                     delay_amplitude_dampen(qubit, gamma=self.gamma, delay=delta_time)
 
+class LocalEntangle(NodeProtocol):
+    def __init__(self, node, qsource_name, start_expression=None, 
+                 input_mem_pos0=0, input_mem_pos1=1, num_pairs=1, name=None):
+        name = name if name else f"LocalEntangle({node.name})"
+        super().__init__(node=node, name=name)
+        if start_expression is not None and not isinstance(start_expression, EventExpression):
+            raise TypeError("Start expression should be a {}, not a {}".format(EventExpression, type(start_expression)))
+        self.start_expression = start_expression
+        self._num_pairs = num_pairs
+        self._mem_positions = None
+        # Claim input memory position:
+        if self.node.qmemory is None:
+            raise ValueError("Node {} does not have a quantum memory assigned.".format(self.node))
+        self._qsource_name = qsource_name
+        self._mem_pos0 = input_mem_pos0
+        self._mem_pos1 = input_mem_pos1
+
+        # 2つの入力ポート
+        self._qin0 = self.node.qmemory.ports[f"qin{self._mem_pos0}"]
+        self._qin1 = self.node.qmemory.ports[f"qin{self._mem_pos1}"]
+
+        # メモリ確保
+        self.node.qmemory.mem_positions[self._mem_pos0].in_use = True
+        self.node.qmemory.mem_positions[self._mem_pos1].in_use = True
+
+    def start(self):
+        self.entangled_pairs = 0  # counter
+        self._mem_positions = [self._mem_pos0, self._mem_pos1]
+        # Claim extra memory positions to use (if any):
+        extra_memory = self._num_pairs - 1
+        if extra_memory > 0:
+            unused_positions = self.node.qmemory.unused_positions
+            if extra_memory > len(unused_positions):
+                raise RuntimeError("Not enough unused memory positions available: need {}, have {}"
+                                   .format(self._num_pairs - 1, len(unused_positions)))
+            for i in unused_positions[:extra_memory]:
+                self._mem_positions.append(i)
+                self.node.qmemory.mem_positions[i].in_use = True
+        # Call parent start method
+        return super().start()
+
+    def stop(self):
+        # Unclaim used memory positions:
+        if self._mem_positions:
+            for i in self._mem_positions[1:]:
+                self.node.qmemory.mem_positions[i].in_use = False
+            self._mem_positions = None
+        # Call parent stop method
+        super().stop()
+
+    def run(self):
+        while True:
+            if self.start_expression is not None:
+                yield self.start_expression
+            elif self.entangled_pairs >= self._num_pairs:
+                break
+            self.node.subcomponents[self._qsource_name].trigger()
+            yield self.await_port_input(self._qin0)
+            yield self.await_port_input(self._qin1)
+            self.entangled_pairs += 1
+            self.send_signal(Signals.SUCCESS, mem_pos)
+
+    @property
+    def is_connected(self):
+        if not super().is_connected:
+            return False
+        if self.node.qmemory is None:
+            return False
+        if self._mem_positions is None and len(self.node.qmemory.unused_positions) < self._num_pairs - 1:
+            return False
+        if self._mem_positions is not None and len(self._mem_positions) != self._num_pairs:
+            return False
+        return True
+
 class WMeasure(NodeProtocol):   # Alice側のプロトコル
     def __init__(self, node, port, start_expression=None, msg_header="wmeasure", omega=np.pi/3, name=None):
         if not isinstance(port, Port):
@@ -232,23 +306,35 @@ class WMeasureExample(LocalProtocol):
         super().__init__(nodes={"A": node_a, "B": node_b}, name="WMeasure example")
         self.num_runs = num_runs
         # エンタングルメント生成プロトコル
-        self.add_subprotocol(EntangleNodes(node=node_a, role="source", input_mem_pos=0,
-                                           num_pairs=2, name="entangle_A"))
-        self.add_subprotocol(EntangleNodes(node=node_b, role="receiver", input_mem_pos=0,
-                                           num_pairs=2, name="entangle_B"))
+        self.add_subprotocol(LocalEntangle(node=node_a, qsource_name="QSource_A", input_mem_pos0=0,
+                                           input_mem_pos1=1, num_pairs=1, name="entangle_A"))
         # 精製処理プロトコル
-        self.add_subprotocol(Bennet(node_a, node_a.ports["cout_bob"], role="A", name="bennet_A"))
-        self.add_subprotocol(Bennet(node_b, node_b.ports["cin_alice"], role="B", name="bennet_B"))
+        #self.add_subprotocol(WMeasure(node_a, node_a.ports["cout_bob"], role="A", name="wmeasure_A"))
+        #self.add_subprotocol(RWMeasure(node_b, node_b.ports["cin_alice"], theta=0.2, name="rwmeasure_B"))
         # エンタングルメント生成プロトコルの開始条件
         self.subprotocols["entangle_A"].start_expression = (
-            self.subprotocols["entangle_A"].await_signal(self.subprotocols["bennet_A"], Signals.FAIL) |
                              self.subprotocols["entangle_A"].await_signal(self, Signals.WAITING))
         # 精製処理プロトコルの開始条件                        
-        self.subprotocols["bennet_A"].start_expression = (
-            self.subprotocols["bennet_A"].await_signal(self.subprotocols["entangle_A"],
-                                                       Signals.SUCCESS))
-        self.subprotocols["bennet_B"].start_expression = (
-            self.subprotocols["bennet_B"].await_signal(self.subprotocols["entangle_B"],
-                                                       Signals.SUCCESS))
+        #self.subprotocols["bennet_A"].start_expression = (
+            #self.subprotocols["bennet_A"].await_signal(self.subprotocols["entangle_A"],
+                                                       #Signals.SUCCESS))
+        #self.subprotocols["bennet_B"].start_expression = (
+            #self.subprotocols["bennet_B"].await_signal(self.subprotocols["entangle_B"],
+                                                       #Signals.SUCCESS))
+    
+    def run(self):
+        self.start_subprotocols()
+        start_time = sim_time()
+        self.subprotocols["entangle_A"].entangled_pairs = 0
+        self.send_signal(Signals.WAITING)
+        yield self.await_signal(self.subprotocols["entangle_A"], Signals.SUCCESS)
+        self.send_signal(Signals.SUCCESS)
+
+def sim_setup(node_a, node_b, num_runs):
+    wm_example = WMeasureExample(node_a, node_b, num_runs=num_runs)
+    return wm_example
 
 network = network_setup()
+wm_example = sim_setup(network.get_node("node_A"), network.get_node("node_B"), 1)
+wm_example.start()
+ns.sim_run()

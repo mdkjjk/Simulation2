@@ -41,59 +41,6 @@ from netsquid.components import QuantumMemory
 #print("This example module is located at: {}".format(ns.examples.purify.__file__))
 #print("This example module is located at: {}".format(ns.qubits.qubitapi.__file__))
 
-class ClassicalConnection(Connection):
-    def __init__(self, length):
-        super().__init__(name="ClassicalConnection")
-        self.add_subcomponent(ClassicalChannel("Channel_A2B", length=length,
-            models={"delay_model": FibreDelayModel()}))
-        self.ports['A'].forward_input(
-            self.subcomponents["Channel_A2B"].ports['send'])
-        self.subcomponents["Channel_A2B"].ports['recv'].forward_output(
-            self.ports['B'])
-
-class EntanglingConnection(Connection):
-    def __init__(self, length, source_frequency):
-        super().__init__(name="EntanglingConnection")
-        timing_model = FixedDelayModel(delay=(1e9 / source_frequency))
-        qsource = QSource("qsource", StateSampler([ks.b11], [1.0]), num_ports=2,
-                          timing_model=timing_model,
-                          status=SourceStatus.INTERNAL)
-        self.add_subcomponent(qsource)
-        damp_rate = 1000
-        qchannel_c2a = QuantumChannel("qchannel_C2A", length=length / 2,
-                                      models={"quantum_noise_model": AmplitudeNoiseModel(damp_rate),
-                                              "delay_model": FibreDelayModel()})
-        qchannel_c2b = QuantumChannel("qchannel_C2B", length=length / 2,
-                                      models={"quantum_noise_model": AmplitudeNoiseModel(damp_rate),
-                                              "delay_model": FibreDelayModel()})
-        # Add channels and forward quantum channel output to external port output:
-        self.add_subcomponent(qchannel_c2a, forward_output=[("A", "recv")])
-        self.add_subcomponent(qchannel_c2b, forward_output=[("B", "recv")])
-        # Connect qsource output to quantum channel input:
-        qsource.ports["qout0"].connect(qchannel_c2a.ports["send"])
-        qsource.ports["qout1"].connect(qchannel_c2b.ports["send"])
-
-def example_network_setup(node_distance=4e-3, depolar_rate=1e7):
-    # Setup nodes Alice and Bob with quantum memories:
-    noise_model = DepolarNoiseModel(depolar_rate=depolar_rate)
-    alice = Node(
-        "Alice", port_names=['qin_charlie', 'cout_bob'],
-        qmemory=QuantumMemory("AliceMemory", num_positions=2))
-    alice.ports['qin_charlie'].forward_input(alice.qmemory.ports['qin1'])
-    bob = Node(
-        "Bob", port_names=['qin_charlie', 'cin_alice'],
-        qmemory=QuantumMemory("BobMemory", num_positions=1))
-    bob.ports['qin_charlie'].forward_input(bob.qmemory.ports['qin0'])
-    # Setup classical connection between nodes:
-    c_conn = ClassicalConnection(length=node_distance)
-    alice.ports['cout_bob'].connect(c_conn.ports['A'])
-    bob.ports['cin_alice'].connect(c_conn.ports['B'])
-    # Setup entangling connection between nodes:
-    q_conn = EntanglingConnection(length=node_distance, source_frequency=2e7)
-    alice.ports['qin_charlie'].connect(q_conn.ports['A'])
-    bob.ports['qin_charlie'].connect(q_conn.ports['B'])
-    return alice, bob, q_conn, c_conn
-
 # 時間依存振幅減衰ノイズ
 def delay_amplitude_dampen(qubit, gamma, delay):
     if gamma < 0:
@@ -151,11 +98,141 @@ class AmplitudeNoiseModel(QuantumErrorModel):
                 if qubit is not None:
                     delay_amplitude_dampen(qubit, gamma=self.gamma, delay=delta_time)
 
-ns.set_qstate_formalism(ns.QFormalism.DM)
-alice, bob, *_ = example_network_setup()
-stats = ns.sim_run(15)
-qA, = alice.qmemory.peek(positions=[1])
-qB, = bob.qmemory.peek(positions=[0])
-qA, qB
-fidelity = ns.qubits.fidelity([qA, qB], ns.b11)
-print(f"Entangled fidelity (after 5 ns wait) = {fidelity:.3f}")
+class LocalEntangle(NodeProtocol):
+    def __init__(self, node, qsource_name, start_expression=None, 
+                 input_mem_pos0=0, input_mem_pos1=1, num_pairs=1, name=None):
+        name = name if name else f"LocalEntangle({node.name})"
+        super().__init__(node=node, name=name)
+        if start_expression is not None and not isinstance(start_expression, EventExpression):
+            raise TypeError("Start expression should be a {}, not a {}".format(EventExpression, type(start_expression)))
+        self.start_expression = start_expression
+        self._num_pairs = num_pairs
+        self._mem_positions = None
+        # Claim input memory position:
+        if self.node.qmemory is None:
+            raise ValueError("Node {} does not have a quantum memory assigned.".format(self.node))
+        self._qsource_name = qsource_name
+        self._mem_pos0 = input_mem_pos0
+        self._mem_pos1 = input_mem_pos1
+
+        # 2つの入力ポート
+        self._qin0 = self.node.qmemory.ports[f"qin{self._mem_pos0}"]
+        self._qin1 = self.node.qmemory.ports[f"qin{self._mem_pos1}"]
+
+        # メモリ確保
+        self.node.qmemory.mem_positions[self._mem_pos0].in_use = True
+        self.node.qmemory.mem_positions[self._mem_pos1].in_use = True
+
+    def start(self):
+        self.entangled_pairs = 0  # counter
+        self._mem_positions = [self._mem_pos0, self._mem_pos1]
+        # Claim extra memory positions to use (if any):
+        extra_memory = self._num_pairs - 1
+        if extra_memory > 0:
+            unused_positions = self.node.qmemory.unused_positions
+            if extra_memory > len(unused_positions):
+                raise RuntimeError("Not enough unused memory positions available: need {}, have {}"
+                                   .format(self._num_pairs - 1, len(unused_positions)))
+            for i in unused_positions[:extra_memory]:
+                self._mem_positions.append(i)
+                self.node.qmemory.mem_positions[i].in_use = True
+        # Call parent start method
+        return super().start()
+
+    def stop(self):
+        # Unclaim used memory positions:
+        if self._mem_positions:
+            for i in self._mem_positions[1:]:
+                self.node.qmemory.mem_positions[i].in_use = False
+            self._mem_positions = None
+        # Call parent stop method
+        super().stop()
+
+    def run(self):
+        while True:
+            if self.start_expression is not None:
+                yield self.start_expression
+            elif self.entangled_pairs >= self._num_pairs:
+                break
+            self.node.subcomponents[self._qsource_name].trigger()
+            yield self.await_port_input(self._qin0)
+            yield self.await_port_input(self._qin1)
+            self.entangled_pairs += 1
+            self.send_signal(Signals.SUCCESS, mem_pos)
+
+    @property
+    def is_connected(self):
+        if not super().is_connected:
+            return False
+        if self.node.qmemory is None:
+            return False
+        if self._mem_positions is None and len(self.node.qmemory.unused_positions) < self._num_pairs - 1:
+            return False
+        if self._mem_positions is not None and len(self._mem_positions) != self._num_pairs:
+            return False
+        return True
+
+def network_setup(source_delay=1e5, source_fidelity_sq=0.9, damp_rate=100, node_distance=1000):
+    network = Network("wmeasure_network")
+
+    # ノード設定
+    node_a, node_b = network.add_nodes(["node_A", "node_B"])
+    node_a.add_subcomponent(QuantumProcessor("QuantumMemory_A", num_positions=11,
+        fallback_to_nonphysical=True))   # パラメータ「memory_noise_models」によりメモリ滞在によるノイズの影響を設定可能
+    state_sampler = StateSampler([ks.b00, ks.s00], probabilities=[source_fidelity_sq, 1 - source_fidelity_sq])
+    source_frequency = 4e4 / node_distance
+    node_a.add_subcomponent(QSource("QSource_A", state_sampler=state_sampler,
+        models={"emission_delay_model": FixedDelayModel(delay=source_delay)},
+        num_ports=2, status=SourceStatus.EXTERNAL))
+    node_b.add_subcomponent(QuantumProcessor("QuantumMemory_B", num_positions=11,
+        fallback_to_nonphysical=True))   # パラメータ「memory_noise_models」によりメモリ滞在によるノイズの影響を設定可能
+
+    # チャネル設定
+    conn_cchannel = DirectConnection("CChannelConn_AB",
+        ClassicalChannel("CChannel_A->B", length=node_distance, models={"delay_model": FibreDelayModel(c=200e3)}),
+        ClassicalChannel("CChannel_B->A", length=node_distance, models={"delay_model": FibreDelayModel(c=200e3)}))
+    network.add_connection(node_a, node_b, connection=conn_cchannel,
+                           port_name_node1="cout_bob", port_name_node2="cin_alice")
+    # quantum_noise_modelに振幅減衰ノイズを指定
+    qchannel = QuantumChannel("QChannel_A->B", length=node_distance,
+                              models={"quantum_noise_model": AmplitudeNoiseModel(gamma=damp_rate, time_independent=False),
+                                      "delay_model": FibreDelayModel(c=200e3)})
+    port_name_a, port_name_b = network.add_connection(
+        node_a, node_b, channel_to=qchannel, label="quantum")
+    
+    # Link Alice ports:
+    node_a.subcomponents["QSource_A"].ports["qout1"].connect(
+        node_a.qmemory.ports["qin1"])
+    node_a.subcomponents["QSource_A"].ports["qout0"].connect(
+        node_a.qmemory.ports["qin0"])
+    node_a.qmemory.ports["qout"].forward_output(node_a.ports[port_name_a])
+    # Link Bob ports:
+    node_b.ports[port_name_b].forward_input(node_b.qmemory.ports["qin0"])
+    return network
+
+class Example(LocalProtocol):
+    def __init__(self, node_a, node_b, num_runs):
+        super().__init__(nodes={"A": node_a, "B": node_b}, name="WMeasure example")
+        self.num_runs = num_runs
+        # エンタングルメント生成プロトコル
+        self.add_subprotocol(LocalEntangle(node=node_a, qsource_name="QSource_A", input_mem_pos0=0,
+                                           input_mem_pos1=1, num_pairs=1, name="entangle_A"))
+
+        self.subprotocols["entangle_A"].start_expression = (
+                             self.subprotocols["entangle_A"].await_signal(self, Signals.WAITING))
+
+    def run(self):
+        self.start_subprotocols()
+        start_time = sim_time()
+        self.send_signal(Signals.WAITING)
+        yield self.await_signal(self.subprotocols["entangle_A"], Signals.SUCCESS)
+        self.send_signal(Signals.SUCCESS)
+
+def sim_setup(node_a, node_b, num_runs):
+    wm_example = Example(node_a, node_b, num_runs=num_runs)
+    return wm_example
+
+network = network_setup()
+wm_example = sim_setup(network.get_node("node_A"), network.get_node("node_B"), 1)
+wm_example.start()
+ns.sim_run()
