@@ -3,6 +3,7 @@ import netsquid as ns
 import pydynaa as pd
 import pandas
 import matplotlib, os
+import math
 from matplotlib import pyplot as plt
 
 from netsquid.qubits import operators as ops
@@ -17,7 +18,7 @@ from netsquid.nodes.node import Node
 from netsquid.nodes.network import Network
 from netsquid.nodes.connections import DirectConnection
 from netsquid.components import ClassicalChannel, QuantumChannel
-from netsquid.components.instructions import INSTR_MEASURE, INSTR_CNOT, INSTR_Y
+from netsquid.components.instructions import INSTR_MEASURE, INSTR_CNOT, INSTR_X
 from netsquid.components.component import Message, Port
 from netsquid.components.qsource import QSource, SourceStatus
 from netsquid.components.qprocessor import QuantumProcessor
@@ -162,16 +163,14 @@ class WMeasure(NodeProtocol):   # Alice側のプロトコル
         name = name if name else "WMeasureNode({}, {})".format(node.name, port.name)
         super().__init__(node, name=name)
         self.port = port
-        self._program = self._flip_program()
         # TODO rename this expression to 'qubit input'
         self.start_expression = start_expression
         self.local_qcount = 0
         self.local_meas_result = None
         self.remote_qcount = 0
-        self.remote_meas_result = None
+        self.remote_meas_OK = False
         self.header = msg_header
         self._qmem_positions = [None, None]
-        self._waiting_on_second_qubit = False
         if start_expression is not None and not isinstance(start_expression, EventExpression):
             raise TypeError("Start expression should be a {}, not a {}".format(EventExpression, type(start_expression)))
         self._set_wmeasurement_operators(omega)
@@ -181,50 +180,89 @@ class WMeasure(NodeProtocol):   # Alice側のプロトコル
         m1 = ops.Operator("M1", [[np.sin(omega/2), 0], [0, np.cos(omega/2)]])
         self.wmeas_ops = [m0, m1]
 
-    def _flip_program(self):
-        prog = QuantumProgram(num_qubits=1)
-        q1 = prog.get_qubit_indices(1)
-        prog.apply(INSTR_X, [q1])
-        return prog
-
     def run(self):
+        cchannel_ready = self.await_port_input(self.port)
         qmemory_ready = self.start_expression
         while True:
-            yield qmemory_ready
-            source_protocol = expr.second_term.atomic_source
-            ready_signal = source_protocol.get_signal_by_event(
-                    event=expr.second_term.triggered_events[0], receiver=self) # エンタングルメントが保存されたメモリポジションを取得
-            print(f"{self.name}: Entanglement received at {ready_signal.result} / time: {sim_time()}")
-            #yield from self._handle_new_qubit(ready_signal.result)
+            expr = yield cchannel_ready | qmemory_ready
+            if expr.first_term.value:
+                classical_message = self.port.rx_input(header=self.header)
+                if classical_message:
+                    self.remote_qcount, self.remote_meas_OK = classical_message.items
+                    self._handle_cchannel_rx()
+            elif expr.second_term.value:
+                source_protocol = expr.second_term.atomic_source
+                ready_signal = source_protocol.get_signal_by_event(
+                        event=expr.second_term.triggered_events[0], receiver=self) # エンタングルメントが保存されたメモリポジションを取得
+                print(f"{self.name}: Entanglement received at {ready_signal.result} / time: {sim_time()}")
+                self._qmem_positions[0] = ready_signal.result["mem_pos0"]
+                self._qmem_positions[1] = ready_signal.result["mem_pos1"]
+                print(self._qmem_positions)
+                yield from self._handle_qubit_rx()
 
     def start(self):
-        # Clear any held qubits
-        self._clear_qmem_positions()
         self.local_qcount = 0
         self.local_meas_result = None
         self.remote_qcount = 0
-        self.remote_meas_result = None
-        self._waiting_on_second_qubit = False
+        self.remote_meas_OK = False
         return super().start()
 
-    def _clear_qmem_positions(self): # 失敗した場合、エンタングルメントを破棄
+    def stop(self):
+        super().stop()
+        # TODO should stop clear qmem_pos?
+        if self._qmem_positions:
+            for i in self._qmem_positions:
+                if self.node.qmemory.mem_positions[i].in_use:
+                    self.node.qmemory.pop(positions=[i])
+
+    def _handle_qubit_rx(self):
+        pos1, pos2 = self._qmem_positions
+        if self.node.qmemory.busy:
+            yield self.await_program(self.node.qmemory)
+        output = self.node.qmemory.execute_instruction(INSTR_MEASURE, [pos2], 
+                                                       meas_operators=self.wmeas_ops)[0]
+        if self.node.qmemory.busy:
+            yield self.await_program(self.node.qmemory)
+        self.local_meas_result = output["instr"][0]
+        print(f"Result: {self.local_meas_result}")
+        self.local_qcount += 1
+        self.port.tx_output(Message([self.local_qcount, self.local_meas_result], header=self.header))
+        if self.local_meas_result == "1":
+            yield self.node.qmemory.execute_instruction(INSTR_X, [pos2])
+        print(f"{self.name}")
+        self.node.qmemory.pop(positions=pos2)
+        self._qmem_positions[1] = None
+        self.send_signal(Signals.SUCCESS, self._qmem_positions)
+        print("WMeasure Done")
+        #self._check_success()
+
+    def _handle_cchannel_rx(self):
+        if (self._qmem_positions is not None and
+                self.node.qmemory.mem_positions[self._qmem_positions[0]].in_use):
+            self._check_success()
+
+    def _check_success(self):
+        if not self.remote_meas_OK:
+            self._handle_fail()
+            self.send_signal(Signals.FAIL, self.local_qcount)
+            self.local_meas_result = None
+            self.remote_meas_OK = False
+
+    def _handle_fail(self):
         positions = [pos for pos in self._qmem_positions if pos is not None]
         if len(positions) > 0:
             self.node.qmemory.pop(positions=positions)
         self._qmem_positions = [None, None]
-
-    def _handle_new_qubit(self, memory_position):
-        assert not self.node.qmemory.mem_positions[memory_position].is_empty
-
+        
 
 class RWMeasure(NodeProtocol):   # Bob側のプロトコル
-    def __init__(self, node, port, start_expression=None, msg_header="rwmeasure", theta=0.2, name=None):
-        if not isinstance(port, Port):
+    def __init__(self, node, port_c, port_q, start_expression=None, msg_header="wmeasure", theta=0.2, name=None):
+        if not isinstance(port_c, Port) or not isinstance(port_q, Port):
             raise ValueError("{} is not a Port".format(port))
-        name = name if name else "WMeasureNode({}, {})".format(node.name, port.name)
+        name = name if name else "RWMeasureNode({}, {})".format(node.name, port.name)
         super().__init__(node, name=name)
-        self.port = port
-        self._program = self._flip_program()
+        self.port_c = port_c
+        self.port_q = port_q
         # TODO rename this expression to 'qubit input'
         self.start_expression = start_expression
         self.local_qcount = 0
@@ -232,8 +270,7 @@ class RWMeasure(NodeProtocol):   # Bob側のプロトコル
         self.remote_qcount = 0
         self.remote_meas_result = None
         self.header = msg_header
-        self._qmem_positions = [None, None]
-        self._waiting_on_second_qubit = False
+        self._qmem_pos = None
         if start_expression is not None and not isinstance(start_expression, EventExpression):
             raise TypeError("Start expression should be a {}, not a {}".format(EventExpression, type(start_expression)))
         self._set_rwmeasurement_operators(theta)
@@ -245,12 +282,40 @@ class RWMeasure(NodeProtocol):   # Bob側のプロトコル
         n1_ = ops.Operator("N1_", [[0, 0], [0, np.sqrt(1-theta*theta)]])
         self.rwmeas_ops0 = [n0, n0_]
         self.rwmeas_ops1 = [n1, n1_]
+    
+    def run(self):
+        cchannel_ready = self.await_port_input(self.port_c)
+        qmemory_ready = self.await_port_input(self.port_q)
+        while True:
+            yield cchannel_ready
+            classical_message = self.port_c.rx_input(header=self.header)
+            if classical_message:
+                self.remote_qcount, self.remote_meas_result = classical_message.items
+                print(f"{self.name}: Alice's result received {classical_message}")
+            yield qmemory_ready
+            if self.node.qmemory.mem_positions[0].in_use:
+                print("Entanglement arrived")
+                self._qmem_pos = 0
+                yield from self._handle_qubit_rx()
+    
+    def start(self):
+        self.local_qcount = 0
+        self.remote_qcount = 0
+        self.local_meas_result = None
+        self.remote_meas_result = None
+        return super().start()
 
-    def _flip_program(self):
-        prog = QuantumProgram(num_qubits=1)
-        q1 = prog.get_qubit_indices(1)
-        prog.apply(INSTR_X, [q1])
-        return prog
+    def stop(self):
+        super().stop()
+        # TODO should stop clear qmem_pos?
+        if self._qmem_pos and self.node.qmemory.mem_positions[self._qmem_pos].in_use:
+            self.node.qmemory.pop(positions=[self._qmem_pos])
+
+    def _handle_qubit_rx(self):
+        if self.node.qmemory.busy:
+            yield self.await_program(self.node.qmemory)
+        if self.remote_meas_result == 1:
+            yield self.node.qmemory.execute_instruction(INSTR_X, [pos2])
 
 def network_setup(source_delay=1e5, source_fidelity_sq=0.9, damp_rate=100, node_distance=1000):
     network = Network("wmeasure_network")
@@ -277,17 +342,17 @@ def network_setup(source_delay=1e5, source_fidelity_sq=0.9, damp_rate=100, node_
     qchannel = QuantumChannel("QChannel_A->B", length=node_distance,
                               models={"quantum_noise_model": AmplitudeNoiseModel(gamma=damp_rate, time_independent=False),
                                       "delay_model": FibreDelayModel(c=200e3)})
-    port_name_a, port_name_b = network.add_connection(
-        node_a, node_b, channel_to=qchannel, label="quantum")
+    network.add_connection(node_a, node_b, channel_to=qchannel, label="quantum",
+                           port_name_node1="qout_bob", port_name_node2="qin_alice")
     
     # Link Alice ports:
     node_a.subcomponents["QSource_A"].ports["qout1"].connect(
         node_a.qmemory.ports["qin1"])
     node_a.subcomponents["QSource_A"].ports["qout0"].connect(
         node_a.qmemory.ports["qin0"])
-    node_a.qmemory.ports["qout"].forward_output(node_a.ports[port_name_a])
+    node_a.qmemory.ports["qout"].forward_output(node_a.ports["qout_bob"])
     # Link Bob ports:
-    node_b.ports[port_name_b].forward_input(node_b.qmemory.ports["qin0"])
+    node_b.ports["qin_alice"].forward_input(node_b.qmemory.ports["qin0"])
     return network
 
 class WMeasureExample(LocalProtocol):
@@ -297,27 +362,28 @@ class WMeasureExample(LocalProtocol):
         # エンタングルメント生成プロトコル
         self.add_subprotocol(LocalEntangle(node=node_a, qsource_name="QSource_A", input_mem_pos0=0,
                                            input_mem_pos1=1, num_pairs=1, name="entangle_A"))
-        # 精製処理プロトコル
-        #self.add_subprotocol(WMeasure(node_a, node_a.ports["cout_bob"], role="A", name="wmeasure_A"))
-        #self.add_subprotocol(RWMeasure(node_b, node_b.ports["cin_alice"], theta=0.2, name="rwmeasure_B"))
+        # 保護処理プロトコル
+        self.add_subprotocol(WMeasure(node_a, node_a.ports["cout_bob"], omega=np.pi/3, name="wmeasure_A"))
+        self.add_subprotocol(RWMeasure(node_b, node_b.ports["cin_alice"],
+                             node_b.ports["qin_alice"], theta=0.2, name="rwmeasure_B"))
         # エンタングルメント生成プロトコルの開始条件
         self.subprotocols["entangle_A"].start_expression = (
                              self.subprotocols["entangle_A"].await_signal(self, Signals.WAITING))
         # 精製処理プロトコルの開始条件                        
-        #self.subprotocols["bennet_A"].start_expression = (
-            #self.subprotocols["bennet_A"].await_signal(self.subprotocols["entangle_A"],
-                                                       #Signals.SUCCESS))
-        #self.subprotocols["bennet_B"].start_expression = (
-            #self.subprotocols["bennet_B"].await_signal(self.subprotocols["entangle_B"],
-                                                       #Signals.SUCCESS))
+        self.subprotocols["wmeasure_A"].start_expression = (
+            self.subprotocols["wmeasure_A"].await_signal(self.subprotocols["entangle_A"],
+                                                       Signals.SUCCESS))
+        self.subprotocols["rwmeasure_B"].start_expression = (
+            self.subprotocols["rwmeasure_B"].await_signal(self, Signals.WAITING))
+                                                       
     
     def run(self):
         self.start_subprotocols()
         start_time = sim_time()
         self.subprotocols["entangle_A"].entangled_pairs = 0
         self.send_signal(Signals.WAITING)
-        yield self.await_signal(self.subprotocols["entangle_A"], Signals.SUCCESS)
-        mem = self.subprotocols["entangle_A"].get_signal_result(Signals.SUCCESS, self)
+        yield self.await_signal(self.subprotocols["rwmeasure_B"], Signals.SUCCESS)
+        mem = self.subprotocols["rwmeasure_B"].get_signal_result(Signals.SUCCESS, self)
         print(mem)
         self.send_signal(Signals.SUCCESS)
 
