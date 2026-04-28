@@ -168,7 +168,7 @@ class WMeasure(NodeProtocol):   # Alice側のプロトコル
         self.local_qcount = 0
         self.local_meas_result = None
         self.remote_qcount = 0
-        self.remote_meas_OK = False
+        self.remote_meas_result = None
         self.header = msg_header
         self._qmem_positions = [None, None]
         if start_expression is not None and not isinstance(start_expression, EventExpression):
@@ -188,7 +188,7 @@ class WMeasure(NodeProtocol):   # Alice側のプロトコル
             if expr.first_term.value:
                 classical_message = self.port.rx_input(header=self.header)
                 if classical_message:
-                    self.remote_qcount, self.remote_meas_OK = classical_message.items
+                    self.remote_qcount, self.remote_meas_result = classical_message.items
                     self._handle_cchannel_rx()
             elif expr.second_term.value:
                 source_protocol = expr.second_term.atomic_source
@@ -204,7 +204,7 @@ class WMeasure(NodeProtocol):   # Alice側のプロトコル
         self.local_qcount = 0
         self.local_meas_result = None
         self.remote_qcount = 0
-        self.remote_meas_OK = False
+        self.remote_meas_result = None
         return super().start()
 
     def stop(self):
@@ -242,11 +242,11 @@ class WMeasure(NodeProtocol):   # Alice側のプロトコル
             self._check_success()
 
     def _check_success(self):
-        if not self.remote_meas_OK:
+        if self.remote_meas_result == 1:
             self._handle_fail()
             self.send_signal(Signals.FAIL, self.local_qcount)
             self.local_meas_result = None
-            self.remote_meas_OK = False
+            self.remote_meas_result = None
 
     def _handle_fail(self):
         positions = [pos for pos in self._qmem_positions if pos is not None]
@@ -293,10 +293,9 @@ class RWMeasure(NodeProtocol):   # Bob側のプロトコル
                 self.remote_qcount, self.remote_meas_result = classical_message.items
                 print(f"{self.name}: Alice's result received {classical_message}")
             yield qmemory_ready
-            if self.node.qmemory.mem_positions[0].in_use:
-                print("Entanglement arrived")
-                self._qmem_pos = 0
-                yield from self._handle_qubit_rx()
+            self._qmem_pos = self.node.qmemory.used_positions
+            print(f"Entanglement arrived at {self._qmem_pos}")
+            yield from self._handle_qubit_rx()
     
     def start(self):
         self.local_qcount = 0
@@ -312,10 +311,39 @@ class RWMeasure(NodeProtocol):   # Bob側のプロトコル
             self.node.qmemory.pop(positions=[self._qmem_pos])
 
     def _handle_qubit_rx(self):
+        pos = self._qmem_pos[0]
         if self.node.qmemory.busy:
             yield self.await_program(self.node.qmemory)
-        if self.remote_meas_result == 1:
-            yield self.node.qmemory.execute_instruction(INSTR_X, [pos2])
+        if self.remote_meas_result == "1":
+            yield self.node.qmemory.execute_instruction(INSTR_X, [pos])
+            print(f"{self.name}")
+            output = self.node.qmemory.execute_instruction(INSTR_MEASURE, [pos], meas_operators=self.rwmeas_ops1)[0]
+            self.local_meas_result = output["instr"][0]
+            print(f"{self.name}: Result = {self.local_meas_result}")
+        else:
+            output = self.node.qmemory.execute_instruction(INSTR_MEASURE, [pos], meas_operators=self.rwmeas_ops0)[0]
+            self.local_meas_result = output["instr"][0]
+            print(f"{self.name}: Result = {self.local_meas_result}")
+        if self.node.qmemory.busy:
+            yield self.await_program(self.node.qmemory)
+        self._check_success()
+
+    def _check_success(self):
+        if self.local_meas_result == 0:
+            self.send_signal(Signals.SUCCESS, self._qmem_pos)
+        else:
+            self._handle_fail()
+            self.send_signal(Signals.FAIL)
+            self.local_meas_result = None
+            self.remote_meas_result = None
+    
+    def _handle_fail(self):
+        positions = [pos for pos in self._qmem_pos if pos is not None]
+        if len(positions) > 0:
+            self.node.qmemory.pop(positions=positions)
+        self._qmem_pos = [None] * len(self._qmem_pos)
+
+        
 
 def network_setup(source_delay=1e5, source_fidelity_sq=0.9, damp_rate=100, node_distance=1000):
     network = Network("wmeasure_network")
@@ -368,13 +396,15 @@ class WMeasureExample(LocalProtocol):
                              node_b.ports["qin_alice"], theta=0.2, name="rwmeasure_B"))
         # エンタングルメント生成プロトコルの開始条件
         self.subprotocols["entangle_A"].start_expression = (
-                             self.subprotocols["entangle_A"].await_signal(self, Signals.WAITING))
+                             self.subprotocols["entangle_A"].await_signal(self, Signals.WAITING) |
+                             self.subprotocols["wmeasure_A"].await_signal(self, Signals.FAIL))
         # 精製処理プロトコルの開始条件                        
         self.subprotocols["wmeasure_A"].start_expression = (
             self.subprotocols["wmeasure_A"].await_signal(self.subprotocols["entangle_A"],
                                                        Signals.SUCCESS))
         self.subprotocols["rwmeasure_B"].start_expression = (
-            self.subprotocols["rwmeasure_B"].await_signal(self, Signals.WAITING))
+            self.subprotocols["rwmeasure_B"].await_signal(self, Signals.WAITING) |
+            self.subprotocols["wmeasure_A"].await_signal(self, Signals.FAIL))
                                                        
     
     def run(self):
