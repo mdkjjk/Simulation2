@@ -62,7 +62,7 @@ wmr_ops1 = [N1, N1_]
 
 # 弱測定
 mresult = gmeasure(qb, meas_operators=meas_ops)
-#print(mresult)
+print(mresult)
 #print(ns.qubits.reduced_dm([qa, qb]))
 # フリップ操作
 if (mresult[0] == 1):
@@ -77,12 +77,14 @@ if (mresult[0] == 1):
 # 逆弱測定
 if (mresult[0] == 0):
     mrresult = gmeasure(qb, meas_operators=wmr_ops0)
+    print(mrresult)
     if (mrresult[0] == 1):
         print("FAIL")
     else:
         print("SUCCESS")
 else:
     mrresult = gmeasure(qb, meas_operators=wmr_ops1)
+    print(mrresult)
     if (mrresult[0] == 1):
         print("FAIL")
     else:

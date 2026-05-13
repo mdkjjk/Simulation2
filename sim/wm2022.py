@@ -189,13 +189,13 @@ class WMeasure(NodeProtocol):   # Alice側のプロトコル
                 classical_message = self.port.rx_input(header=self.header)
                 if classical_message:
                     self.remote_qcount, self.remote_meas_result = classical_message.items
-                    print(f"{self.name}: Bob's result received {classical_message}")
+                    #print(f"{self.name}: Bob's result received {classical_message}")
                     self._handle_cchannel_rx()
             elif expr.second_term.value:
                 source_protocol = expr.second_term.atomic_source
                 ready_signal = source_protocol.get_signal_by_event(
                         event=expr.second_term.triggered_events[0], receiver=self) # エンタングルメントが保存されたメモリポジションを取得
-                print(f"{self.name}: Entanglement received at {ready_signal.result} / time: {sim_time()}")      
+                #print(f"{self.name}: Entanglement received at {ready_signal.result} / time: {sim_time()}")      
                 self._qmem_positions[0] = ready_signal.result["mem_pos0"]
                 self._qmem_positions[1] = ready_signal.result["mem_pos1"]
                 yield from self._handle_qubit_rx()
@@ -216,11 +216,14 @@ class WMeasure(NodeProtocol):   # Alice側のプロトコル
         if self.node.qmemory.busy:
             yield self.await_program(self.node.qmemory)
         self.local_meas_result = output["instr"][0]
-        print(f"{self.name}: Result = {self.local_meas_result}")
+        #print(f"{self.name}: Result = {self.local_meas_result}")
         self.local_qcount += 1
         self.port.tx_output(Message([self.local_qcount, self.local_meas_result], header=self.header))
-        if self.local_meas_result == "1":
-            yield self.node.qmemory.execute_instruction(INSTR_X, [pos2])
+        if self.local_meas_result == 1:
+            #print(f"{self.name}: Flip operation")
+            if self.node.qmemory.busy:
+                yield self.await_program(self.node.qmemory)
+            self.node.qmemory.execute_instruction(INSTR_X, [pos2])
         qubit = self.node.qmemory.pop(positions=pos2)
         #print(f"{self.name}: {self.node.qmemory.used_positions}")
         self._qmem_positions[1] = None
@@ -232,17 +235,16 @@ class WMeasure(NodeProtocol):   # Alice側のプロトコル
             self._check_success()
 
     def _check_success(self):
-        print(f"{self.name}: Remote result is {self.remote_meas_result}")
+        #print(f"{self.name}: Remote result is {self.remote_meas_result}")
         if self.remote_meas_result == 1:
             self._handle_fail()
             self.send_signal(Signals.FAIL, self.local_qcount)
-            print(f"{self.name}: FAIL")
+            #print(f"{self.name}: FAIL")
             self.local_meas_result = None
             self.remote_meas_result = None
         else:
             self.send_signal(Signals.SUCCESS, self._qmem_positions[0])
-            print(f"{self.name}: SUCCESS")
-            print("WMeasure Done")
+            #print(f"{self.name}: SUCCESS")
 
 
     def _handle_fail(self):
@@ -281,21 +283,22 @@ class RWMeasure(NodeProtocol):   # Bob側のプロトコル
         self.rwmeas_ops1 = [n1, n1_]
     
     def run(self):
-        cchannel_ready = self.await_port_input(self.port_c)
         while True:
+            cchannel_ready = self.await_port_input(self.port_c)
             qmemory_ready = self.await_port_input(self.port_q)
             expr = yield cchannel_ready | qmemory_ready
             if expr.first_term.value:
                 classical_message = self.port_c.rx_input(header=self.header)
                 if classical_message:
                     self.remote_qcount, self.remote_meas_result = classical_message.items
-                    print(f"{self.name}: Alice's result received {classical_message}")
+                    #print(f"{self.name}: Alice's result received {classical_message}")
             elif expr.second_term.value:
                 #print(f"{self.name}: {self.node.qmemory.used_positions}")
                 self._qmem_pos = self.node.qmemory.used_positions
-                print(f"{self.name}: Entanglement arrived at {self._qmem_pos}")
-                self.local_qcount += 1
-                yield from self._handle_qubit_rx()
+                #print(f"{self.name}: Entanglement arrived at {self._qmem_pos}")
+                #print(f"{self.name}: Remote result = {self.remote_meas_result}")
+                if self.remote_meas_result is not None:
+                    yield from self._handle_qubit_rx()
     
     def start(self):
         self.local_qcount = 0
@@ -308,23 +311,26 @@ class RWMeasure(NodeProtocol):   # Bob側のプロトコル
         super().stop()
 
     def _handle_qubit_rx(self):
-        print(f"{self.name}: Local qcount is {self.local_qcount}")
+        self.local_qcount += 1
+        #print(f"{self.name}: Local qcount is {self.local_qcount}")
         pos = self._qmem_pos[0]
         if self.node.qmemory.busy:
             yield self.await_program(self.node.qmemory)
         if self.remote_meas_result == 1:
+            #print(f"{self.name}: Remote result = 1 -> Flip operation")
             self.node.qmemory.execute_instruction(INSTR_X, [pos])
             if self.node.qmemory.busy:
                 yield self.await_program(self.node.qmemory)
-            print(f"{self.name}: Remote result = 1")
-            output = self.node.qmemory.execute_instruction(INSTR_MEASURE, [pos], meas_operators=self.rwmeas_ops1)[0]
+            out = self.node.qmemory.execute_instruction(INSTR_MEASURE, [pos], meas_operators=self.rwmeas_ops1)
+            #print(out)
+            output = out[0]
             self.local_meas_result = output["instr"][0]
-            print(f"{self.name}: Result = {self.local_meas_result}")
+            #print(f"{self.name}: Result = {output}")
         else:
-            print(f"{self.name}: Remote result = 0")
+            #print(f"{self.name}: Remote result = 0")
             output = self.node.qmemory.execute_instruction(INSTR_MEASURE, [pos], meas_operators=self.rwmeas_ops0)[0]
             self.local_meas_result = output["instr"][0]
-            print(f"{self.name}: Result = {self.local_meas_result}")
+            #print(f"{self.name}: Result = {self.local_meas_result}")
         if self.node.qmemory.busy:
             yield self.await_program(self.node.qmemory)
         self.port_c.tx_output(Message([self.local_qcount, self.local_meas_result], header=self.header))
@@ -333,14 +339,14 @@ class RWMeasure(NodeProtocol):   # Bob側のプロトコル
     def _check_success(self):
         if (self.local_qcount > 0 and self.local_qcount == self.remote_qcount and
                 self.local_meas_result == 0):
-            print(f"{self.name}: SUCCESS")
-            print(f"{self.name}: Qubit in mem_pos {self._qmem_pos[0]}? {self.node.qmemory.mem_positions[self._qmem_pos[0]].in_use}")
+            #print(f"{self.name}: SUCCESS")
             self.send_signal(Signals.SUCCESS, self._qmem_pos[0])
+            self.remote_meas_result = None
         elif self.local_meas_result == 0 and self.local_qcount > self.remote_qcount:
             pass
         else:
             self._handle_fail()
-            print(f"{self.name}: FAIL")
+            #print(f"{self.name}: FAIL")
             self.send_signal(Signals.FAIL, self.local_qcount)
             self.local_meas_result = None
             self.remote_meas_result = None
@@ -353,7 +359,7 @@ class RWMeasure(NodeProtocol):   # Bob側のプロトコル
 
         
 
-def network_setup(source_delay=1e5, source_fidelity_sq=0.9, damp_rate=100, node_distance=1000):
+def network_setup(source_delay=1e5, source_fidelity_sq=0.9, damp_rate=150, node_distance=2000):
     network = Network("wmeasure_network")
 
     # ノード設定
@@ -392,7 +398,7 @@ def network_setup(source_delay=1e5, source_fidelity_sq=0.9, damp_rate=100, node_
     return network
 
 class WMeasureExample(LocalProtocol):
-    def __init__(self, node_a, node_b, num_runs):
+    def __init__(self, node_a, node_b, num_runs, omega, theta):
         super().__init__(nodes={"A": node_a, "B": node_b}, name="WMeasure example")
         self.num_runs = num_runs
         # エンタングルメント生成プロトコル
@@ -417,6 +423,7 @@ class WMeasureExample(LocalProtocol):
     def run(self):
         self.start_subprotocols()
         for i in range(self.num_runs):
+            #print(f"Simulation {i}")
             start_time = sim_time()
             self.subprotocols["entangle_A"].entangled_pairs = 0
             self.send_signal(Signals.WAITING)
@@ -432,8 +439,8 @@ class WMeasureExample(LocalProtocol):
             }
             self.send_signal(Signals.SUCCESS, result)
 
-def sim_setup(node_a, node_b, num_runs):
-    wm_example = WMeasureExample(node_a, node_b, num_runs=num_runs)
+def sim_setup(node_a, node_b, num_runs, omega, theta):
+    wm_example = WMeasureExample(node_a, node_b, num_runs, omega, theta)
 
     def record_run(evexpr):
         # Callback that collects data each run
@@ -442,7 +449,6 @@ def sim_setup(node_a, node_b, num_runs):
         # Record fidelity
         q_A, = node_a.qmemory.pop(positions=[result["pos_A"]])
         q_B, = node_b.qmemory.pop(positions=[result["pos_B"]])
-        print(q_B)
         #print(qapi.reduced_dm([q_A, q_B]))
         f2 = qapi.fidelity([q_A, q_B], ks.b00, squared=True)
         return {"F2": f2, "pairs": result["pairs"], "time": result["time"]}
@@ -453,9 +459,42 @@ def sim_setup(node_a, node_b, num_runs):
                                      event_type=Signals.SUCCESS.value))
     return wm_example, dc
 
+def run_experiment(variables):
+    fidelity_data = pandas.DataFrame()
+    for omega in variables:
+        ns.sim_reset()
+        network = network_setup()
+        node_a = network.get_node("node_A")
+        node_b = network.get_node("node_B")
+        wm_example, dc = sim_setup(node_a, node_b, 100, omega, 0.2)
+        wm_example.start()
+        ns.sim_run()
+        df = dc.dataframe
+        df['omega'] = omega
+        fidelity_data = pandas.concat([fidelity_data, df])
+    return fidelity_data
+
+def create_plot():
+    matplotlib.use('Agg')
+    variables = [i for i in np.arange(0.0, np.pi/2, np.pi/12)]
+    fidelities = run_experiment(variables)
+    plot_style = {'kind': 'scatter', 'grid': True,
+                'title': "Fidelity of the entanglement with weak measurement"}
+    data = fidelities.groupby("omega")['F2'].agg(
+        fidelity='mean', sem='sem').reset_index()
+    save_dir = "./plots_test"
+    existing_files1 = len([f for f in os.listdir(save_dir) if f.startswith("WM fidelity")])
+    filename = f"{save_dir}/WM fidelity_{existing_files1 + 1}.png"
+    data.plot(x='omega', y='fidelity', yerr='sem', **plot_style)
+    plt.savefig(filename)
+    print(f"Plot saved as {filename}")
+    existing_files2 = len([f for f in os.listdir(save_dir) if f.startswith("WM result")])
+    fidelities.to_csv(f"{save_dir}/WM result_{existing_files2 + 1}.csv")
+
 if __name__ == "__main__":
-    network = network_setup()
-    wm_example, dc = sim_setup(network.get_node("node_A"), network.get_node("node_B"), 1)
-    wm_example.start()
-    ns.sim_run()
-    print("Average fidelity of generated entanglement with WM: {}".format(dc.dataframe["F2"].mean()))
+    #network = network_setup()
+    #wm_example, dc = sim_setup(network.get_node("node_A"), network.get_node("node_B"), 1)
+    #wm_example.start()
+    #ns.sim_run()
+    #print("Average fidelity of generated entanglement with WM: {}".format(dc.dataframe["F2"].mean()))
+    create_plot()
