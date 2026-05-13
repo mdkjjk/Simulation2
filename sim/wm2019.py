@@ -1,0 +1,130 @@
+import numpy as np
+import netsquid as ns
+import pydynaa as pd
+import pandas
+import matplotlib, os
+import math
+from matplotlib import pyplot as plt
+
+from netsquid.qubits import operators as ops
+from netsquid.qubits import qubitapi as qapi
+from netsquid.qubits import ketstates as ks
+from netsquid.qubits.qubitapi import fidelity, discard
+from netsquid.qubits.ketstates import s00, b00
+from netsquid.qubits.state_sampler import StateSampler
+from netsquid.qubits.qformalism import QFormalism
+from netsquid.qubits.dmtools import DenseDMRepr
+from netsquid.nodes.node import Node
+from netsquid.nodes.network import Network
+from netsquid.nodes.connections import DirectConnection
+from netsquid.components import ClassicalChannel, QuantumChannel
+from netsquid.components.instructions import INSTR_MEASURE, INSTR_CNOT, INSTR_X
+from netsquid.components.component import Message, Port
+from netsquid.components.qsource import QSource, SourceStatus
+from netsquid.components.qprocessor import QuantumProcessor
+from netsquid.components.qprogram import QuantumProgram
+from netsquid.components.models import DepolarNoiseModel
+from netsquid.components.models.delaymodels import FixedDelayModel, FibreDelayModel
+from netsquid.components.models.qerrormodels import QuantumErrorModel
+from netsquid.protocols.protocol import Signals
+from netsquid.protocols.nodeprotocols import NodeProtocol, LocalProtocol
+from netsquid.util.simtools import sim_time
+from netsquid.util.datacollector import DataCollector
+from netsquid.util.constrainedmap import ValueConstraint
+from netsquid.examples.entanglenodes import EntangleNodes
+from pydynaa import EventExpression
+
+ns.set_qstate_formalism(QFormalism.DM)
+
+#時間非依存位相減衰ノイズ
+def phase_dampen(qubit, prob=1):
+    krausops1 = [[1, 0],[0, np.sqrt(1-prob)]]
+    krausops2 = [[0, 0],[0, np.sqrt(prob)]]
+    krausops = [krausops1, krausops2]
+
+    multi_operate([qubit], krausops)
+
+#時間依存位相減衰ノイズ
+def delay_phase_dampen(qubit, gamma, delay):
+    if gamma < 0:
+        raise ValueError(f"damp_rate {gamma} should be non-negative.")
+    
+    damp_rate = 1 - np.exp(-2 * gamma * delay)
+    phase_dampen(qubit, damp_rate)
+
+#位相減衰ノイズモデル
+class PhaseNoiseModel(QuantumErrorModel):
+    def __init__(self, gamma, time_independent=False, **kwargs):
+        super().__init__(**kwargs)
+        # NOTE time independence should be set *before* the rate
+        self.add_property('time_independent', time_independent, value_type=bool)
+
+        def gamma_constraint(value):
+            if self.time_independent and not 0 <= value <= 1:
+                return False
+            elif value < 0:
+                return False
+            return True
+        self.add_property('gamma', gamma,
+                          value_type=(int, float),
+                          value_constraints=ValueConstraint(gamma_constraint))
+    
+    @property
+    def gamma(self):
+        return self.properties['gamma']
+    
+    @gamma.setter
+    def gamma(self, value):
+        self.properties['gamma'] = value
+
+    @property
+    def time_independent(self):
+        """bool: Whether the probability of depolarizing is time independent."""
+        return self.properties['time_independent']
+
+    @time_independent.setter
+    def time_independent(self, value):
+        self.properties['time_independent'] = value
+    
+    def error_operation(self, qubits, delta_time=0, **kwargs):
+        if self.time_independent:   # 時間非依存
+            for qubit in qubits:
+                if qubit is not None:
+                    phase_dampen(qubit, gamma)
+        else:                       # 時間依存
+            for qubit in qubits:
+                if qubit is not None:
+                    delay_phase_dampen(qubit, gamma=self.gamma, delay=delta_time)
+
+def network_setup(source_delay=1e5, source_fidelity_sq=0.9, damp_rate=150, node_distance=2000):
+    network = Network("wmeasure_network")
+
+    # ノード設定
+    node_a, node_b = network.add_nodes(["node_A", "node_B"])
+    node_a.add_subcomponent(QuantumProcessor("QuantumMemory_A", num_positions=11,
+        fallback_to_nonphysical=True))   # パラメータ「memory_noise_models」によりメモリ滞在によるノイズの影響を設定可能
+    node_b.add_subcomponent(QuantumProcessor("QuantumMemory_B", num_positions=11,
+        fallback_to_nonphysical=True))   # パラメータ「memory_noise_models」によりメモリ滞在によるノイズの影響を設定可能
+
+    # チャネル設定
+    conn_cchannel = DirectConnection("CChannelConn_AB",
+        ClassicalChannel("CChannel_A->B", length=node_distance, models={"delay_model": FibreDelayModel(c=200e3)}),
+        ClassicalChannel("CChannel_B->A", length=node_distance, models={"delay_model": FibreDelayModel(c=200e3)}))
+    network.add_connection(node_a, node_b, connection=conn_cchannel,
+                           port_name_node1="cout_bob", port_name_node2="cin_alice")
+    # quantum_noise_modelに振幅減衰ノイズを指定
+    qchannel = QuantumChannel("QChannel_A->B", length=node_distance,
+                              models={"quantum_noise_model": PhaseNoiseModel(gamma=damp_rate, time_independent=False),
+                                      "delay_model": FibreDelayModel(c=200e3)})
+    network.add_connection(node_a, node_b, channel_to=qchannel, label="quantum",
+                           port_name_node1="qout_bob", port_name_node2="qin_alice")
+    
+    # Link Alice ports:
+    node_a.qmemory.ports["qout"].forward_output(node_a.ports["qout_bob"])
+    # Link Bob ports:
+    node_b.ports["qin_alice"].forward_input(node_b.qmemory.ports["qin0"])
+    return network
+
+
+
+network = network_setup()
