@@ -156,11 +156,11 @@ class LocalEntangle(NodeProtocol):
                       "mem_pos1": self._mem_pos1,}
             self.send_signal(Signals.SUCCESS, result)
 
-class WMeasure(NodeProtocol):   # Alice側のプロトコル
-    def __init__(self, node, port, start_expression=None, msg_header="wmeasure", omega=np.pi/3, name=None):
+class Protect(NodeProtocol):   # Alice側のプロトコル
+    def __init__(self, node, port, start_expression=None, msg_header="protect", omega=np.pi/3, name=None):
         if not isinstance(port, Port):
             raise ValueError("{} is not a Port".format(port))
-        name = name if name else "WMeasureNode({}, {})".format(node.name, port.name)
+        name = name if name else "ProtectNode({}, {})".format(node.name, port.name)
         super().__init__(node, name=name)
         self.port = port
         # TODO rename this expression to 'qubit input'
@@ -255,7 +255,7 @@ class WMeasure(NodeProtocol):   # Alice側のプロトコル
         
 
 class RWMeasure(NodeProtocol):   # Bob側のプロトコル
-    def __init__(self, node, port_c, port_q, start_expression=None, msg_header="wmeasure", theta=0.2, name=None):
+    def __init__(self, node, port_c, port_q, start_expression=None, msg_header="protect", theta=0.2, name=None):
         if not isinstance(port_c, Port) or not isinstance(port_q, Port):
             raise ValueError("{} is not a Port".format(port))
         name = name if name else "RWMeasureNode({}, {})".format(node.name, port.name)
@@ -397,28 +397,28 @@ def network_setup(source_delay=1e5, source_fidelity_sq=0.9, damp_rate=150, node_
     node_b.ports["qin_alice"].forward_input(node_b.qmemory.ports["qin0"])
     return network
 
-class WMeasureExample(LocalProtocol):
+class ProtectExample(LocalProtocol):
     def __init__(self, node_a, node_b, num_runs, omega, theta):
-        super().__init__(nodes={"A": node_a, "B": node_b}, name="WMeasure example")
+        super().__init__(nodes={"A": node_a, "B": node_b}, name="Protect example")
         self.num_runs = num_runs
         # エンタングルメント生成プロトコル
         self.add_subprotocol(LocalEntangle(node=node_a, qsource_name="QSource_A", input_mem_pos0=0,
                                            input_mem_pos1=1, num_pairs=1, name="entangle_A"))
         # 保護処理プロトコル
-        self.add_subprotocol(WMeasure(node_a, node_a.ports["cout_bob"], omega=np.pi/3, name="wmeasure_A"))
+        self.add_subprotocol(Protect(node_a, node_a.ports["cout_bob"], omega=np.pi/3, name="protect_A"))
         self.add_subprotocol(RWMeasure(node_b, node_b.ports["cin_alice"],
                              node_b.ports["qin_alice"], theta=0.2, name="rwmeasure_B"))
         # エンタングルメント生成プロトコルの開始条件
         self.subprotocols["entangle_A"].start_expression = (
                              self.subprotocols["entangle_A"].await_signal(self, Signals.WAITING) |
-                             self.subprotocols["entangle_A"].await_signal(self.subprotocols["wmeasure_A"], Signals.FAIL))
+                             self.subprotocols["entangle_A"].await_signal(self.subprotocols["protect_A"], Signals.FAIL))
         # 精製処理プロトコルの開始条件                        
-        self.subprotocols["wmeasure_A"].start_expression = (
-            self.subprotocols["wmeasure_A"].await_signal(self.subprotocols["entangle_A"],
+        self.subprotocols["protect_A"].start_expression = (
+            self.subprotocols["protect_A"].await_signal(self.subprotocols["entangle_A"],
                                                        Signals.SUCCESS))
         self.subprotocols["rwmeasure_B"].start_expression = (
             self.subprotocols["rwmeasure_B"].await_signal(self, Signals.WAITING) |
-            self.subprotocols["rwmeasure_B"].await_signal(self.subprotocols["wmeasure_A"], Signals.FAIL))
+            self.subprotocols["rwmeasure_B"].await_signal(self.subprotocols["protect_A"], Signals.FAIL))
                                                        
     def run(self):
         self.start_subprotocols()
@@ -427,9 +427,9 @@ class WMeasureExample(LocalProtocol):
             start_time = sim_time()
             self.subprotocols["entangle_A"].entangled_pairs = 0
             self.send_signal(Signals.WAITING)
-            yield (self.await_signal(self.subprotocols["wmeasure_A"], Signals.SUCCESS) &
+            yield (self.await_signal(self.subprotocols["protect_A"], Signals.SUCCESS) &
                     self.await_signal(self.subprotocols["rwmeasure_B"], Signals.SUCCESS))
-            signal_A = self.subprotocols["wmeasure_A"].get_signal_result(Signals.SUCCESS, self)
+            signal_A = self.subprotocols["protect_A"].get_signal_result(Signals.SUCCESS, self)
             signal_B = self.subprotocols["rwmeasure_B"].get_signal_result(Signals.SUCCESS, self)
             result = {
                 "pos_A": signal_A,
@@ -440,7 +440,7 @@ class WMeasureExample(LocalProtocol):
             self.send_signal(Signals.SUCCESS, result)
 
 def sim_setup(node_a, node_b, num_runs, omega, theta):
-    wm_example = WMeasureExample(node_a, node_b, num_runs, omega, theta)
+    pro_example = ProtectExample(node_a, node_b, num_runs, omega, theta)
 
     def record_run(evexpr):
         # Callback that collects data each run
@@ -455,9 +455,9 @@ def sim_setup(node_a, node_b, num_runs, omega, theta):
 
     dc = DataCollector(record_run, include_time_stamp=False,
                        include_entity_name=False)
-    dc.collect_on(pd.EventExpression(source=wm_example,
+    dc.collect_on(pd.EventExpression(source=pro_example,
                                      event_type=Signals.SUCCESS.value))
-    return wm_example, dc
+    return pro_example, dc
 
 def run_experiment(variables):
     fidelity_data = pandas.DataFrame()
@@ -466,8 +466,8 @@ def run_experiment(variables):
         network = network_setup()
         node_a = network.get_node("node_A")
         node_b = network.get_node("node_B")
-        wm_example, dc = sim_setup(node_a, node_b, 100, omega, 0.2)
-        wm_example.start()
+        pro_example, dc = sim_setup(node_a, node_b, 100, omega, 0.2)
+        pro_example.start()
         ns.sim_run()
         df = dc.dataframe
         df['omega'] = omega
@@ -493,8 +493,8 @@ def create_plot():
 
 if __name__ == "__main__":
     #network = network_setup()
-    #wm_example, dc = sim_setup(network.get_node("node_A"), network.get_node("node_B"), 1)
-    #wm_example.start()
+    #pro_example, dc = sim_setup(network.get_node("node_A"), network.get_node("node_B"), 1)
+    #pro_example.start()
     #ns.sim_run()
     #print("Average fidelity of generated entanglement with WM: {}".format(dc.dataframe["F2"].mean()))
     create_plot()

@@ -9,7 +9,7 @@ from matplotlib import pyplot as plt
 from netsquid.qubits import operators as ops
 from netsquid.qubits import qubitapi as qapi
 from netsquid.qubits import ketstates as ks
-from netsquid.qubits.qubitapi import fidelity, discard
+from netsquid.qubits.qubitapi import fidelity, discard, multi_operate
 from netsquid.qubits.ketstates import s00, b00
 from netsquid.qubits.state_sampler import StateSampler
 from netsquid.qubits.qformalism import QFormalism
@@ -18,7 +18,7 @@ from netsquid.nodes.node import Node
 from netsquid.nodes.network import Network
 from netsquid.nodes.connections import DirectConnection
 from netsquid.components import ClassicalChannel, QuantumChannel
-from netsquid.components.instructions import INSTR_MEASURE, INSTR_CNOT, INSTR_X
+from netsquid.components.instructions import INSTR_MEASURE, INSTR_CNOT, INSTR_H, INSTR_INIT
 from netsquid.components.component import Message, Port
 from netsquid.components.qsource import QSource, SourceStatus
 from netsquid.components.qprocessor import QuantumProcessor
@@ -38,8 +38,8 @@ ns.set_qstate_formalism(QFormalism.DM)
 
 #時間非依存位相減衰ノイズ
 def phase_dampen(qubit, prob=1):
-    krausops1 = [[1, 0],[0, np.sqrt(1-prob)]]
-    krausops2 = [[0, 0],[0, np.sqrt(prob)]]
+    krausops1 = ops.Operator("E1", [[1, 0],[0, np.sqrt(1-prob)]])
+    krausops2 = ops.Operator("E2", [[0, 0],[0, np.sqrt(prob)]])
     krausops = [krausops1, krausops2]
 
     multi_operate([qubit], krausops)
@@ -49,7 +49,7 @@ def delay_phase_dampen(qubit, gamma, delay):
     if gamma < 0:
         raise ValueError(f"damp_rate {gamma} should be non-negative.")
     
-    damp_rate = 1 - np.exp(-2 * gamma * delay)
+    damp_rate = 1 - np.exp(-2 * gamma * delay * 1e-9)
     phase_dampen(qubit, damp_rate)
 
 #位相減衰ノイズモデル
@@ -90,13 +90,91 @@ class PhaseNoiseModel(QuantumErrorModel):
         if self.time_independent:   # 時間非依存
             for qubit in qubits:
                 if qubit is not None:
-                    phase_dampen(qubit, gamma)
+                    phase_dampen(qubit, self.gamma)
         else:                       # 時間依存
             for qubit in qubits:
                 if qubit is not None:
                     delay_phase_dampen(qubit, gamma=self.gamma, delay=delta_time)
 
-def network_setup(source_delay=1e5, source_fidelity_sq=0.9, damp_rate=150, node_distance=2000):
+class Prepare(NodeProtocol):
+    def __init__(self, node, port, start_expression=None, msg_header="wmeasure", name=None):
+        if not isinstance(port, Port):
+            raise ValueError("{} is not a Port".format(port))
+        name = name if name else "PrepareNode({}, {})".format(node.name, port.name)
+        super().__init__(node, name=name)
+        self.port = port
+        self.start_expression = start_expression
+        self.header = msg_header
+        self._program = self._init_program()
+        self._qmem_positions = None
+        if start_expression is not None and not isinstance(start_expression, EventExpression):
+            raise TypeError("Start expression should be a {}, not a {}".format(EventExpression, type(start_expression)))
+        
+    def _init_program(self):
+        prog = QuantumProgram(num_qubits=1)
+        q1, = prog.get_qubit_indices(1)
+        prog.apply(INSTR_INIT, [q1])
+        prog.apply(INSTR_H, [q1])
+        return prog
+
+    def run(self):
+        while True:
+            yield self.start_expression
+            yield self.node.qmemory.execute_program(self._program)
+            self._qmem_positions = self.node.qmemory.used_positions
+            qubit = self.node.qmemory.peek(positions=self._qmem_positions)
+            print(qapi.reduced_dm(qubit))
+            self.node.qmemory.pop(positions=self._qmem_positions)
+            self._qmem_positions = None
+    
+    def start(self):
+        self._clear_qmem_positions()
+        return super().start()
+    
+    def _clear_qmem_positions(self):
+        self.node.qmemory.pop(positions=self._qmem_positions)
+        self._qmem_positions = None
+
+class WMeasure(NodeProtocol):
+    def __init__(self, node, port, start_expression=None, msg_header="wmeasure", name=None):
+        if not isinstance(port, Port):
+            raise ValueError("{} is not a Port".format(port))
+        name = name if name else "WMeasureNode({}, {})".format(node.name, port.name)
+        super().__init__(node, name=name)
+        self.port = port
+        self.start_expression = start_expression
+        self.header = msg_header
+        self._qmem_positions = None
+        if start_expression is not None and not isinstance(start_expression, EventExpression):
+            raise TypeError("Start expression should be a {}, not a {}".format(EventExpression, type(start_expression)))
+    
+    def run(self):
+        while True:
+            yield self.await_port_input(self.port)
+            self._qmem_positions = self.node.qmemory.used_positions
+            qubit = self.node.qmemory.peek(positions=self._qmem_positions)
+            print(qapi.reduced_dm(qubit))
+
+class WMeasureExample(LocalProtocol):
+    def __init__(self, node_a, node_b, num_runs):
+        super().__init__(nodes={"A": node_a, "B": node_b}, name="WMeasure example")
+        self.num_runs = num_runs
+
+        self.add_subprotocol(Prepare(node_a, node_a.ports["qout_bob"], name="wmeasure_A"))
+        self.add_subprotocol(WMeasure(node_b, node_b.ports["qin_alice"], name="wmeasure_B"))
+
+        self.subprotocols["wmeasure_A"].start_expression = self.subprotocols["wmeasure_A"].await_signal(self, Signals.WAITING)
+        self.subprotocols["wmeasure_B"].start_expression = self.subprotocols["wmeasure_B"].await_signal(self, Signals.WAITING)
+    
+    def run(self):
+        self.start_subprotocols()
+        self.send_signal(Signals.WAITING)
+        
+def sim_setup(node_a, node_b, num_runs):
+    wm_example = WMeasureExample(node_a, node_b, num_runs)
+    return wm_example
+
+def network_setup(source_delay=1e5, source_fidelity_sq=0.9, damp_rate=50, node_distance=2000):
     network = Network("wmeasure_network")
 
     # ノード設定
@@ -128,3 +206,6 @@ def network_setup(source_delay=1e5, source_fidelity_sq=0.9, damp_rate=150, node_
 
 
 network = network_setup()
+wm_example = sim_setup(network.get_node("node_A"), network.get_node("node_B"), 1)
+wm_example.start()
+ns.sim_run()
