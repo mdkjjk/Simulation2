@@ -10,7 +10,8 @@ from netsquid.qubits import operators as ops
 from netsquid.qubits import qubitapi as qapi
 from netsquid.qubits import ketstates as ks
 from netsquid.qubits.qubitapi import fidelity, discard, multi_operate
-from netsquid.qubits.ketstates import s00, b00
+from netsquid.qubits.ketstates import s00, b00, s0, s1, h0, h1, y0, y1
+from netsquid.qubits.ketutil import outerprod
 from netsquid.qubits.state_sampler import StateSampler
 from netsquid.qubits.qformalism import QFormalism
 from netsquid.qubits.dmtools import DenseDMRepr
@@ -96,6 +97,7 @@ class PhaseNoiseModel(QuantumErrorModel):
                 if qubit is not None:
                     delay_phase_dampen(qubit, gamma=self.gamma, delay=delta_time)
 
+# Alice側のプロトコル
 class Prepare(NodeProtocol):
     def __init__(self, node, port, start_expression=None, msg_header="wmeasure", name=None):
         if not isinstance(port, Port):
@@ -123,20 +125,23 @@ class Prepare(NodeProtocol):
             yield self.node.qmemory.execute_program(self._program)
             self._qmem_positions = self.node.qmemory.used_positions
             qubit = self.node.qmemory.peek(positions=self._qmem_positions)
-            print(qapi.reduced_dm(qubit))
+            state = np.array([[ns.qubits.reduced_dm(qubit)[0][0], ns.qubits.reduced_dm(qubit)[0][1]],
+                              [ns.qubits.reduced_dm(qubit)[1][0], ns.qubits.reduced_dm(qubit)[1][1]]])
+            print(state)
             self.node.qmemory.pop(positions=self._qmem_positions)
             self._qmem_positions = None
-    
-    def start(self):
-        self._clear_qmem_positions()
-        return super().start()
+            self.send_signal(Signals.SUCCESS, state)
     
     def _clear_qmem_positions(self):
         self.node.qmemory.pop(positions=self._qmem_positions)
         self._qmem_positions = None
+    
+    def start(self):
+        return super().start()
 
+# Bob側のプロトコル
 class WMeasure(NodeProtocol):
-    def __init__(self, node, port, start_expression=None, msg_header="wmeasure", name=None):
+    def __init__(self, node, port, start_expression=None, msg_header="wmeasure", theta=0.4, eta=0.6, name=None):
         if not isinstance(port, Port):
             raise ValueError("{} is not a Port".format(port))
         name = name if name else "WMeasureNode({}, {})".format(node.name, port.name)
@@ -147,13 +152,65 @@ class WMeasure(NodeProtocol):
         self._qmem_positions = None
         if start_expression is not None and not isinstance(start_expression, EventExpression):
             raise TypeError("Start expression should be a {}, not a {}".format(EventExpression, type(start_expression)))
-    
+        self._set_wmeasurement_operators(theta)
+        self._set_rotation_operators(eta)
+
+    def _set_wmeasurement_operators(self, theta):
+        mxp = ops.Operator("Mx+", np.cos(theta/2) * outerprod(h0) + np.sin(theta/2) * outerprod(h1))
+        mxm = ops.Operator("Mx-", np.cos(theta/2) * outerprod(h1) + np.sin(theta/2) * outerprod(h0))
+        myp = ops.Operator("My+", np.cos(theta/2) * outerprod(y0) + np.sin(theta/2) * outerprod(y1))
+        mym = ops.Operator("My-", np.cos(theta/2) * outerprod(y1) + np.sin(theta/2) * outerprod(y0))
+        mzp = ops.Operator("Mz+", np.cos(theta/2) * outerprod(s0) + np.sin(theta/2) * outerprod(s1))
+        mzm = ops.Operator("Mz-", np.cos(theta/2) * outerprod(s1) + np.sin(theta/2) * outerprod(s0))
+        self.meas_ops_x = [mxp, mxm]
+        self.meas_ops_y = [myp, mym]
+        self.meas_ops_z = [mzp, mzm]
+
+    def _set_rotation_operators(self, eta):
+        Rxp = ops.Operator("Rx+", [[np.cos(eta/2), -np.sin(eta/2)*1j],[np.sin(eta/2)*1j, np.cos(eta/2)]])
+        Rxm = ops.Operator("Rx-", [[np.cos(eta/2), np.sin(eta/2)*1j],[-np.sin(eta/2)*1j, np.cos(eta/2)]])
+        Ryp = ops.Operator("Ry+", [[np.cos(eta/2), -np.sin(eta/2)],[np.sin(eta/2), np.cos(eta/2)]])
+        Rym = ops.Operator("Ry-", [[np.cos(eta/2), np.sin(eta/2)],[-np.sin(eta/2), np.cos(eta/2)]])
+        Rzp = ops.Operator("Rz+", [[np.exp((eta/2)*1j), 0],[0, np.exp(-(eta/2)*1j)]])
+        Rzm = ops.Operator("Rz-", [[np.exp(-(eta/2)*1j), 0],[0, np.exp((eta/2)*1j)]])
+        self.rot_ops_x = [Rxp, Rxm]
+        self.rot_ops_y = [Ryp, Rym]
+        self.rot_ops_z = [Rzp, Rzm]
+
     def run(self):
         while True:
             yield self.await_port_input(self.port)
             self._qmem_positions = self.node.qmemory.used_positions
             qubit = self.node.qmemory.peek(positions=self._qmem_positions)
-            print(qapi.reduced_dm(qubit))
+            state = ns.qubits.reduced_dm(qubit)
+            print(state)
+            ccs = [np.abs(2 * state[0][1].real), np.abs(2 * state[0][1].imag), np.abs(2 * state[0][0] - 1)]
+            print(ccs)
+            axis = ccs.index(max(ccs))
+            if axis == 0:
+                if ccs[1] > ccs[2]:
+                    meas_operators = self.meas_ops_y
+                    rot_axis = self.rot_ops_z
+                else:
+                    meas_operators = self.meas_ops_z
+                    rot_axis = self.rot_ops_y
+            elif axis == 1:
+                if ccs[0] > ccs[2]:
+                    meas_operators = self.meas_ops_x
+                    rot_axis = self.rot_ops_z
+                else:
+                    meas_operators = self.meas_ops_z
+                    rot_axis = self.rot_ops_x
+            else:
+                if ccs[0] > ccs[1]:
+                    meas_operators = self.meas_ops_x
+                    rot_axis = self.rot_ops_y
+                else:
+                    meas_operators = self.meas_ops_y
+                    rot_axis = self.rot_ops_x
+            output = self.node.qmemory.execute_instruction(INSTR_MEASURE, self._qmem_positions, meas_operators=meas_operators)
+            mresult = output["instr"][0]
+            
 
 class WMeasureExample(LocalProtocol):
     def __init__(self, node_a, node_b, num_runs):
@@ -161,7 +218,7 @@ class WMeasureExample(LocalProtocol):
         self.num_runs = num_runs
 
         self.add_subprotocol(Prepare(node_a, node_a.ports["qout_bob"], name="wmeasure_A"))
-        self.add_subprotocol(WMeasure(node_b, node_b.ports["qin_alice"], name="wmeasure_B"))
+        self.add_subprotocol(WMeasure(node_b, node_b.ports["qin_alice"], theta=0.4, name="wmeasure_B"))
 
         self.subprotocols["wmeasure_A"].start_expression = self.subprotocols["wmeasure_A"].await_signal(self, Signals.WAITING)
         self.subprotocols["wmeasure_B"].start_expression = self.subprotocols["wmeasure_B"].await_signal(self, Signals.WAITING)

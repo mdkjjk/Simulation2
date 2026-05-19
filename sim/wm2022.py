@@ -321,9 +321,7 @@ class RWMeasure(NodeProtocol):   # Bob側のプロトコル
             self.node.qmemory.execute_instruction(INSTR_X, [pos])
             if self.node.qmemory.busy:
                 yield self.await_program(self.node.qmemory)
-            out = self.node.qmemory.execute_instruction(INSTR_MEASURE, [pos], meas_operators=self.rwmeas_ops1)
-            #print(out)
-            output = out[0]
+            output = self.node.qmemory.execute_instruction(INSTR_MEASURE, [pos], meas_operators=self.rwmeas_ops1)
             self.local_meas_result = output["instr"][0]
             #print(f"{self.name}: Result = {output}")
         else:

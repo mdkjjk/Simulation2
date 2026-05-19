@@ -9,7 +9,7 @@ from netsquid.qubits.qubitapi import assign_qstate, gmeasure, fidelity, multi_op
 set_qstate_formalism(QFormalism.DM)
     
 # phase dampingのKraus演算子
-p = 0.8   # 減衰率
+p = 0.7   # 減衰率
 e1 = [[1, 0],[0, np.sqrt(1-p)]]
 e2 = [[0, 0],[0, np.sqrt(p)]]
 E1 = ops.Operator("E1", e1)
@@ -37,7 +37,7 @@ print(dm)
 print(fidelity(q, state))
 
 # 測定演算子
-theta = 0.3   # 測定強度
+theta = 0.4   # 測定強度
 mxp = ops.Operator("Mx+", np.cos(theta/2) * outerprod(h0) + np.sin(theta/2) * outerprod(h1))
 mxm = ops.Operator("Mx-", np.cos(theta/2) * outerprod(h1) + np.sin(theta/2) * outerprod(h0))
 myp = ops.Operator("My+", np.cos(theta/2) * outerprod(y0) + np.sin(theta/2) * outerprod(y1))
@@ -66,6 +66,7 @@ Rzm = ops.Operator("Rz-", rzm)
 
 # 弱測定
 axis = dm.index(max(dm))
+print(axis)
 if axis == 0:
     if dm[1] > dm[2]:
         meas_operators = meas_ops_y
