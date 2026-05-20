@@ -19,7 +19,7 @@ from netsquid.nodes.node import Node
 from netsquid.nodes.network import Network
 from netsquid.nodes.connections import DirectConnection
 from netsquid.components import ClassicalChannel, QuantumChannel
-from netsquid.components.instructions import INSTR_MEASURE, INSTR_CNOT, INSTR_H, INSTR_INIT
+from netsquid.components.instructions import INSTR_MEASURE, INSTR_CNOT, INSTR_H, INSTR_INIT, IGate
 from netsquid.components.component import Message, Port
 from netsquid.components.qsource import QSource, SourceStatus
 from netsquid.components.qprocessor import QuantumProcessor
@@ -127,7 +127,7 @@ class Prepare(NodeProtocol):
             qubit = self.node.qmemory.peek(positions=self._qmem_positions)
             state = np.array([[ns.qubits.reduced_dm(qubit)[0][0], ns.qubits.reduced_dm(qubit)[0][1]],
                               [ns.qubits.reduced_dm(qubit)[1][0], ns.qubits.reduced_dm(qubit)[1][1]]])
-            print(state)
+            #print(state)
             self.node.qmemory.pop(positions=self._qmem_positions)
             self._qmem_positions = None
             self.send_signal(Signals.SUCCESS, state)
@@ -177,59 +177,58 @@ class WMeasure(NodeProtocol):
         self.rot_ops_y = [Ryp, Rym]
         self.rot_ops_z = [Rzp, Rzm]
 
+    def _rotation_program(self, mresult, rot_axis):
+        INSTR_R = IGate("R_gate", operator=rot_axis[0]) if mresult == 0 else IGate("R_gate", operator=rot_axis[1])
+        prog = QuantumProgram(num_qubits=1)
+        q1 = prog.get_qubit_indices(1)
+        prog.apply(INSTR_R, q1)
+        return prog
+
     def run(self):
         while True:
             yield self.await_port_input(self.port)
             self._qmem_positions = self.node.qmemory.used_positions
-            qubit = self.node.qmemory.peek(positions=self._qmem_positions)
-            state = ns.qubits.reduced_dm(qubit)
-            print(state)
-            ccs = [np.abs(2 * state[0][1].real), np.abs(2 * state[0][1].imag), np.abs(2 * state[0][0] - 1)]
-            print(ccs)
-            axis = ccs.index(max(ccs))
-            if axis == 0:
-                if ccs[1] > ccs[2]:
-                    meas_operators = self.meas_ops_y
-                    rot_axis = self.rot_ops_z
-                else:
-                    meas_operators = self.meas_ops_z
-                    rot_axis = self.rot_ops_y
-            elif axis == 1:
-                if ccs[0] > ccs[2]:
-                    meas_operators = self.meas_ops_x
-                    rot_axis = self.rot_ops_z
-                else:
-                    meas_operators = self.meas_ops_z
-                    rot_axis = self.rot_ops_x
+            #print(self._qmem_positions)
+            yield from self._handle_new_qubit(self._qmem_positions)
+            self.send_signal(Signals.SUCCESS, self._qmem_positions[0])
+
+    def _handle_new_qubit(self, memory_position):
+        assert not self.node.qmemory.mem_positions[memory_position[0]].is_empty
+        qubit = self.node.qmemory.peek(positions=memory_position)
+        state = ns.qubits.reduced_dm(qubit)
+        #print(state)
+        ccs = [np.abs(2 * state[0][1].real), np.abs(2 * state[0][1].imag), np.abs(2 * state[0][0] - 1)]
+        #print(ccs)
+        axis = ccs.index(max(ccs))
+        yield from self._weak_measurement(ccs, axis)
+
+    def _weak_measurement(self, ccs, axis):
+        if axis == 0:
+            if ccs[1] > ccs[2]:
+                meas_operators = self.meas_ops_y
+                rot_axis = self.rot_ops_z
             else:
-                if ccs[0] > ccs[1]:
-                    meas_operators = self.meas_ops_x
-                    rot_axis = self.rot_ops_y
-                else:
-                    meas_operators = self.meas_ops_y
-                    rot_axis = self.rot_ops_x
-            output = self.node.qmemory.execute_instruction(INSTR_MEASURE, self._qmem_positions, meas_operators=meas_operators)
-            mresult = output["instr"][0]
-            
-
-class WMeasureExample(LocalProtocol):
-    def __init__(self, node_a, node_b, num_runs):
-        super().__init__(nodes={"A": node_a, "B": node_b}, name="WMeasure example")
-        self.num_runs = num_runs
-
-        self.add_subprotocol(Prepare(node_a, node_a.ports["qout_bob"], name="wmeasure_A"))
-        self.add_subprotocol(WMeasure(node_b, node_b.ports["qin_alice"], theta=0.4, name="wmeasure_B"))
-
-        self.subprotocols["wmeasure_A"].start_expression = self.subprotocols["wmeasure_A"].await_signal(self, Signals.WAITING)
-        self.subprotocols["wmeasure_B"].start_expression = self.subprotocols["wmeasure_B"].await_signal(self, Signals.WAITING)
-    
-    def run(self):
-        self.start_subprotocols()
-        self.send_signal(Signals.WAITING)
-        
-def sim_setup(node_a, node_b, num_runs):
-    wm_example = WMeasureExample(node_a, node_b, num_runs)
-    return wm_example
+                meas_operators = self.meas_ops_z
+                rot_axis = self.rot_ops_y
+        elif axis == 1:
+            if ccs[0] > ccs[2]:
+                meas_operators = self.meas_ops_x
+                rot_axis = self.rot_ops_z
+            else:
+                meas_operators = self.meas_ops_z
+                rot_axis = self.rot_ops_x
+        else:
+            if ccs[0] > ccs[1]:
+                meas_operators = self.meas_ops_x
+                rot_axis = self.rot_ops_y
+            else:
+                meas_operators = self.meas_ops_y
+                rot_axis = self.rot_ops_x
+        output = self.node.qmemory.execute_instruction(INSTR_MEASURE, self._qmem_positions, meas_operators=meas_operators)
+        mresult = output[0]["instr"][0]
+        if self.node.qmemory.busy:
+            yield self.await_program(self.node.qmemory)
+        yield self.node.qmemory.execute_program(self._rotation_program(mresult, rot_axis), self._qmem_positions)
 
 def network_setup(source_delay=1e5, source_fidelity_sq=0.9, damp_rate=50, node_distance=2000):
     network = Network("wmeasure_network")
@@ -260,9 +259,57 @@ def network_setup(source_delay=1e5, source_fidelity_sq=0.9, damp_rate=50, node_d
     node_b.ports["qin_alice"].forward_input(node_b.qmemory.ports["qin0"])
     return network
 
+class WMeasureExample(LocalProtocol):
+    def __init__(self, node_a, node_b, num_runs):
+        super().__init__(nodes={"A": node_a, "B": node_b}, name="WMeasure example")
+        self.num_runs = num_runs
 
+        self.add_subprotocol(Prepare(node_a, node_a.ports["qout_bob"], name="wmeasure_A"))
+        self.add_subprotocol(WMeasure(node_b, node_b.ports["qin_alice"], theta=0.3, eta=0.5, name="wmeasure_B"))
+
+        self.subprotocols["wmeasure_A"].start_expression = self.subprotocols["wmeasure_A"].await_signal(self, Signals.WAITING)
+        self.subprotocols["wmeasure_B"].start_expression = self.subprotocols["wmeasure_B"].await_signal(self, Signals.WAITING)
+    
+    def run(self):
+        self.start_subprotocols()
+        for i in range(self.num_runs):
+            start_time = sim_time()
+            self.send_signal(Signals.WAITING)
+            yield (self.await_signal(self.subprotocols["wmeasure_A"], Signals.SUCCESS) &
+                        self.await_signal(self.subprotocols["wmeasure_B"], Signals.SUCCESS))
+            signal_A = self.subprotocols["wmeasure_A"].get_signal_result(Signals.SUCCESS, self)
+            signal_B = self.subprotocols["wmeasure_B"].get_signal_result(Signals.SUCCESS, self)
+            result = {
+                "ideal_state": signal_A,
+                "pos_B": signal_B,
+                "time": sim_time() - start_time
+            }
+            self.send_signal(Signals.SUCCESS, result)
+        
+def sim_setup(node_a, node_b, num_runs):
+    wm_example = WMeasureExample(node_a, node_b, num_runs)
+
+    def record_run(evexpr):
+        protocol = evexpr.triggered_events[-1].source
+        result = protocol.get_signal_result(Signals.SUCCESS)
+        #print(result)
+        ideal_state = result["ideal_state"]
+        q, = node_b.qmemory.pop(positions=[result["pos_B"]])
+        f2 = qapi.fidelity(q, ideal_state, squared=True)
+        return {"F2": f2, "time": result["time"]}
+
+    dc = DataCollector(record_run, include_time_stamp=False,
+                       include_entity_name=False)
+    dc.collect_on(pd.EventExpression(source=wm_example,
+                                     event_type=Signals.SUCCESS.value))
+    return wm_example, dc
+
+def run_experiment(variables):
+    fidelity_data = pandas.DataFrame()
+    
 
 network = network_setup()
-wm_example = sim_setup(network.get_node("node_A"), network.get_node("node_B"), 1)
+wm_example, dc = sim_setup(network.get_node("node_A"), network.get_node("node_B"), 1)
 wm_example.start()
 ns.sim_run()
+print("Average fidelity of generated entanglement with WM: {}".format(dc.dataframe["F2"].mean()))
