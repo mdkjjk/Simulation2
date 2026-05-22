@@ -260,12 +260,12 @@ def network_setup(source_delay=1e5, source_fidelity_sq=0.9, damp_rate=50, node_d
     return network
 
 class WMeasureExample(LocalProtocol):
-    def __init__(self, node_a, node_b, num_runs):
+    def __init__(self, node_a, node_b, num_runs, theta=0.3, eta=0.5):
         super().__init__(nodes={"A": node_a, "B": node_b}, name="WMeasure example")
         self.num_runs = num_runs
 
         self.add_subprotocol(Prepare(node_a, node_a.ports["qout_bob"], name="wmeasure_A"))
-        self.add_subprotocol(WMeasure(node_b, node_b.ports["qin_alice"], theta=0.3, eta=0.5, name="wmeasure_B"))
+        self.add_subprotocol(WMeasure(node_b, node_b.ports["qin_alice"], theta=theta, eta=eta, name="wmeasure_B"))
 
         self.subprotocols["wmeasure_A"].start_expression = self.subprotocols["wmeasure_A"].await_signal(self, Signals.WAITING)
         self.subprotocols["wmeasure_B"].start_expression = self.subprotocols["wmeasure_B"].await_signal(self, Signals.WAITING)
@@ -273,6 +273,7 @@ class WMeasureExample(LocalProtocol):
     def run(self):
         self.start_subprotocols()
         for i in range(self.num_runs):
+            #print(f"Simulation {i}")
             start_time = sim_time()
             self.send_signal(Signals.WAITING)
             yield (self.await_signal(self.subprotocols["wmeasure_A"], Signals.SUCCESS) &
@@ -286,8 +287,8 @@ class WMeasureExample(LocalProtocol):
             }
             self.send_signal(Signals.SUCCESS, result)
         
-def sim_setup(node_a, node_b, num_runs):
-    wm_example = WMeasureExample(node_a, node_b, num_runs)
+def sim_setup(node_a, node_b, num_runs, theta, eta):
+    wm_example = WMeasureExample(node_a, node_b, num_runs, theta, eta)
 
     def record_run(evexpr):
         protocol = evexpr.triggered_events[-1].source
@@ -304,12 +305,51 @@ def sim_setup(node_a, node_b, num_runs):
                                      event_type=Signals.SUCCESS.value))
     return wm_example, dc
 
-def run_experiment(variables):
+def run_experiment(var_t, var_e):
     fidelity_data = pandas.DataFrame()
-    
+    for theta in var_t:
+        for eta in var_e:
+            ns.sim_reset()
+            network = network_setup()
+            node_a = network.get_node("node_A")
+            node_b = network.get_node("node_B")
+            pro_example, dc = sim_setup(node_a, node_b, 2, theta, eta)
+            pro_example.start()
+            ns.sim_run()
+            df = dc.dataframe
+            df['theta'] = theta
+            df['eta'] = eta
+            fidelity_data = pandas.concat([fidelity_data, df])
+    return fidelity_data
 
-network = network_setup()
-wm_example, dc = sim_setup(network.get_node("node_A"), network.get_node("node_B"), 1)
-wm_example.start()
-ns.sim_run()
-print("Average fidelity of generated entanglement with WM: {}".format(dc.dataframe["F2"].mean()))
+def create_plot():
+    matplotlib.use('Agg')
+    var_t = [i for i in np.arange(0.0, np.pi/2, np.pi/12)]
+    var_e = [i for i in np.arange(0.0, np.pi, np.pi/12)]
+    fidelities = run_experiment(var_t, var_e)
+    data = fidelities.groupby(["theta", "eta"])['F2'].mean().reset_index()
+    heatmap_data = data.pivot(index='eta', columns='theta', values='F2')
+    plt.figure(figsize=(8, 6))
+    im = plt.imshow(heatmap_data, origin='lower', aspect='auto', extent=[min(var_t), max(var_t),min(var_e),max(var_e)])
+    # カラーバー
+    plt.colorbar(im, label='Average Fidelity')
+    # 軸ラベル
+    plt.xlabel(r'Measurement strength $\theta$')
+    plt.ylabel(r'Rotation angle $\eta$')
+    # タイトル
+    plt.title("Fidelity Heatmap with weak measurement")
+    save_dir = "./plots_test"
+    existing_files1 = len([f for f in os.listdir(save_dir) if f.startswith("WM_2019 fidelity")])
+    filename = f"{save_dir}/WM_2019 fidelity_{existing_files1 + 1}.png"
+    plt.savefig(filename)
+    print(f"Plot saved as {filename}")
+    existing_files2 = len([f for f in os.listdir(save_dir) if f.startswith("WM_2019 result")])
+    fidelities.to_csv(f"{save_dir}/WM_2019 result_{existing_files2 + 1}.csv")
+
+if __name__ == "__main__":
+    #network = network_setup()
+    #wm_example, dc = sim_setup(network.get_node("node_A"), network.get_node("node_B"), 10, 0.3, 0.5)
+    #wm_example.start()
+    #ns.sim_run()
+    #print("Average fidelity of generated entanglement with WM: {}".format(dc.dataframe["F2"].mean()))
+    create_plot()
