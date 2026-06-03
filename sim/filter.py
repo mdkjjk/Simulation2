@@ -1,4 +1,3 @@
-#蒸留操作を加えたシミュレーション
 import numpy as np
 import netsquid as ns
 import pydynaa as pd
@@ -10,7 +9,7 @@ from noise import AmplitudeNoiseModel, PhaseNoiseModel
 
 import netsquid.components.instructions as instr
 from netsquid.components import ClassicalChannel, QuantumChannel
-from netsquid.components.instructions import INSTR_MEASURE, INSTR_CNOT, IGate
+from netsquid.components.instructions import INSTR_MEASURE
 from netsquid.components.component import Message, Port
 from netsquid.components.qsource import QSource, SourceStatus
 from netsquid.components.qprocessor import QuantumProcessor
@@ -19,6 +18,8 @@ from netsquid.components.models.delaymodels import FixedDelayModel, FibreDelayMo
 from netsquid.components.models import DepolarNoiseModel
 from netsquid.util.simtools import sim_time
 from netsquid.util.datacollector import DataCollector
+from netsquid.qubits.ketutil import outerprod
+from netsquid.qubits.ketstates import s0, s1
 from netsquid.qubits import operators as ops
 from netsquid.qubits import qubitapi as qapi
 from netsquid.qubits import ketstates as ks
@@ -32,8 +33,8 @@ from netsquid.examples.entanglenodes import EntangleNodes
 from pydynaa import EventExpression
 
 
-class Distil(NodeProtocol):
-    """Protocol that does local DEJMPS distillation on a node.
+class Filter(NodeProtocol):
+    """Protocol that does local filtering on a node.
 
     This is done in combination with another node.
 
@@ -43,153 +44,128 @@ class Distil(NodeProtocol):
         Node with a quantum memory to run protocol on.
     port : :py:class:`~netsquid.components.component.Port`
         Port to use for classical IO communication to the other node.
-    role : "A" or "B"
-        Distillation requires that one of the nodes ("B") conjugate its rotation,
-        while the other doesn't ("A").
-    start_expression : :class:`~pydynaa.EventExpression`
-        EventExpression node should wait for before starting distillation.
-        The EventExpression should have a protocol as source, this protocol should signal the quantum memory position
-        of the qubit.
+    start_expression : :class:`~pydynaa.core.EventExpression` or None, optional
+        Event expression node should wait for before starting filter.
+        This event expression should have a
+        :class:`~netsquid.protocols.protocol.Protocol` as source and should by fired
+        by signalling a signal by this protocol, with the position of the qubit on the
+        quantum memory as signal result.
+        Must be set before the protocol can start
     msg_header : str, optional
         Value of header meta field used for classical communication.
+    epsilon : float, optional
+        Parameter used in filter's measurement operator.
     name : str or None, optional
         Name of protocol. If None a default name is set.
 
-    """
-    # set basis change operators for local DEJMPS step
-    _INSTR_Rx = IGate("Rx_gate", ops.create_rotation_op(np.pi / 2, (1, 0, 0)))
-    _INSTR_RxC = IGate("RxC_gate", ops.create_rotation_op(np.pi / 2, (1, 0, 0), conjugate=True))
+    Attributes
+    ----------
+    meas_ops : list
+        Measurement operators to use for filter general measurement.
 
-    def __init__(self, node, port, role, start_expression=None, msg_header="distil", name=None):
-        if role.upper() not in ["A", "B"]:
-            raise ValueError
-        conj_rotation = role.upper() == "B"
+    """
+
+    def __init__(self, node, port, start_expression=None, msg_header="filter",
+                 epsilon=0.3, name=None):
         if not isinstance(port, Port):
             raise ValueError("{} is not a Port".format(port))
-        name = name if name else "DistilNode({}, {})".format(node.name, port.name)
-        super().__init__(node, name=name)
+        name = name if name else "Filter({}, {})".format(node.name, port.name)
+        super().__init__(node, name)
         self.port = port
         # TODO rename this expression to 'qubit input'
         self.start_expression = start_expression
-        self._program = self._setup_dejmp_program(conj_rotation)
-        # self.INSTR_ROT = self._INSTR_Rx if not conj_rotation else self._INSTR_RxC
         self.local_qcount = 0
-        self.local_meas_result = None
+        self.local_meas_OK = False
         self.remote_qcount = 0
-        self.remote_meas_result = None
+        self.remote_meas_OK = False
         self.header = msg_header
-        self._qmem_positions = [None, None]
-        self._waiting_on_second_qubit = False
+        self._qmem_pos = None
         if start_expression is not None and not isinstance(start_expression, EventExpression):
             raise TypeError("Start expression should be a {}, not a {}".format(EventExpression, type(start_expression)))
+        self._set_measurement_operators(epsilon)
 
-    def _setup_dejmp_program(self, conj_rotation):
-        INSTR_ROT = self._INSTR_Rx if not conj_rotation else self._INSTR_RxC
-        prog = QuantumProgram(num_qubits=2)
-        q1, q2 = prog.get_qubit_indices(2)
-        prog.apply(INSTR_ROT, [q1])
-        prog.apply(INSTR_ROT, [q2])
-        prog.apply(INSTR_CNOT, [q1, q2])
-        prog.apply(INSTR_MEASURE, q2, output_key="m", inplace=False)
-        return prog
+    def _set_measurement_operators(self, epsilon):
+        m0 = ops.Operator("M0", np.sqrt(epsilon) * outerprod(s0) + outerprod(s1))
+        m1 = ops.Operator("M1", np.sqrt(1 - epsilon) * outerprod(s0))
+        self.meas_ops = [m0, m1]
 
     def run(self):
         cchannel_ready = self.await_port_input(self.port)
         qmemory_ready = self.start_expression
         while True:
-            #print(f"{self.name}: Start")
             # self.send_signal(Signals.WAITING)
             expr = yield cchannel_ready | qmemory_ready
             # self.send_signal(Signals.BUSY)
             if expr.first_term.value:
                 classical_message = self.port.rx_input(header=self.header)
                 if classical_message:
-                    self.remote_qcount, self.remote_meas_result = classical_message.items
+                    self.remote_qcount, self.remote_meas_OK = classical_message.items
                     #print(f"{self.name}: Result received at {classical_message} / time: {sim_time()}")
+                    self._handle_cchannel_rx()
             elif expr.second_term.value:
                 source_protocol = expr.second_term.atomic_source
                 ready_signal = source_protocol.get_signal_by_event(
                     event=expr.second_term.triggered_events[0], receiver=self)
-                #print(f"{self.name}: Entanglement received at {ready_signal.result} / time: {sim_time()}")
-                yield from self._handle_new_qubit(ready_signal.result)
-            self._check_success()
+                self._qmem_pos = ready_signal.result
+                #print(f"{self.name}: Entanglement received at {self._qmem_pos} / time: {sim_time()}")
+                yield from self._handle_qubit_rx()
 
+    # TODO does start reset vars?
     def start(self):
-        # Clear any held qubits
-        self._clear_qmem_positions()
         self.local_qcount = 0
-        self.local_meas_result = None
         self.remote_qcount = 0
-        self.remote_meas_result = None
-        self._waiting_on_second_qubit = False
+        self.local_meas_OK = False
+        self.remote_meas_OK = False
         return super().start()
 
-    def _clear_qmem_positions(self):
-        positions = [pos for pos in self._qmem_positions if pos is not None]
-        #print(f"{self.name}: pop_positions = {positions} at _clear_qmem_positions")
-        if len(positions) > 0:
-            self.node.qmemory.pop(positions=positions)
-        self._qmem_positions = [None, None]
-        #print(f"{self.name}: qmem_positions = {self._qmem_positions}")
+    def stop(self):
+        super().stop()
+        # TODO should stop clear qmem_pos?
+        if self._qmem_pos and self.node.qmemory.mem_positions[self._qmem_pos].in_use:
+            self.node.qmemory.pop(positions=[self._qmem_pos])
 
-    def _handle_new_qubit(self, memory_position):
-        # Process signalling of new entangled qubit
-        assert not self.node.qmemory.mem_positions[memory_position].is_empty
-        if self._waiting_on_second_qubit:
-            # Second qubit arrived: perform distil
-            assert not self.node.qmemory.mem_positions[self._qmem_positions[0]].is_empty
-            assert memory_position != self._qmem_positions[0]
-            self._qmem_positions[1] = memory_position
-            #print(f"{self.name}: qmem_positions = {self._qmem_positions}")
-            self._waiting_on_second_qubit = False
-            yield from self._node_do_DEJMPS()
-        else:
-            # New candidate for first qubit arrived
-            # Pop previous qubit if present:
-            pop_positions = [p for p in self._qmem_positions if p is not None and p != memory_position]
-            #print(f"{self.name}: pop_positions = {pop_positions} at _handle_new_qubit")
-            if len(pop_positions) > 0:
-                self.node.qmemory.pop(positions=pop_positions)
-            # Set new position:
-            self._qmem_positions[0] = memory_position
-            self._qmem_positions[1] = None
-            #print(f"{self.name}: qmem_positions = {self._qmem_positions}")
-            self.local_qcount += 1
-            self.local_meas_result = None
-            self._waiting_on_second_qubit = True
-
-    def _node_do_DEJMPS(self):
-        # Perform DEJMPS distillation protocol locally on one node
-        #print(f"{self.name}: qmem_positions = {self._qmem_positions}")
-        pos1, pos2 = self._qmem_positions
+    def _handle_qubit_rx(self):
+        # Handle incoming Qubit on this node.
         if self.node.qmemory.busy:
             yield self.await_program(self.node.qmemory)
-        # We perform local DEJMPS
-        yield self.node.qmemory.execute_program(self._program, [pos1, pos2])  # If instruction not instant
-        self.local_meas_result = self._program.output["m"][0]
-        self._qmem_positions[1] = None
-        #print(f"{self.name}: qmem_positions = {self._qmem_positions}")
-        # Send local results to the remote node to allow it to check for success.
-        self.port.tx_output(Message([self.local_qcount, self.local_meas_result],
-                                    header=self.header))
+        # Retrieve Qubit from input store
+        output = self.node.qmemory.execute_instruction(INSTR_MEASURE, [self._qmem_pos], meas_operators=self.meas_ops)[0]
+        if self.node.qmemory.busy:
+            yield self.await_program(self.node.qmemory)
+        m = output["instr"][0]
+        # m = INSTR_MEASURE(self.node.qmemory, [self._qmem_pos], meas_operators=self.meas_ops)[0]
+        self.local_qcount += 1
+        self.local_meas_OK = (m == 0)
+        self.port.tx_output(Message([self.local_qcount, self.local_meas_OK], header=self.header))
+        self._check_success()
+
+    def _handle_cchannel_rx(self):
+        # Handle incoming classical message from sister node.
+        if (self.local_qcount == self.remote_qcount and
+                self._qmem_pos is not None and
+                self.node.qmemory.mem_positions[self._qmem_pos].in_use):
+            self._check_success()
 
     def _check_success(self):
-        # Check if distillation succeeded by comparing local and remote results
-        if (self.local_qcount == self.remote_qcount and
-                self.local_meas_result is not None and
-                self.remote_meas_result is not None):
-            if self.local_meas_result == self.remote_meas_result:
-                # SUCCESS
-                self.send_signal(Signals.SUCCESS, self._qmem_positions[0])
-                #print(f"{self.name}: SUCCESS / time: {sim_time()}")
-            else:
-                # FAILURE
-                self._clear_qmem_positions()
-                self.send_signal(Signals.FAIL, self.local_qcount)
-                #print(f"{self.name}: FAIL / time: {sim_time()}")
-            self.local_meas_result = None
-            self.remote_meas_result = None
-            self._qmem_positions = [None, None]
+        # Check if protocol succeeded after receiving new input (qubit or classical information).
+        # Returns true if protocol has succeeded on this node
+        if (self.local_qcount > 0 and self.local_qcount == self.remote_qcount and
+                self.local_meas_OK and self.remote_meas_OK):
+            # SUCCESS!
+            self.send_signal(Signals.SUCCESS, self._qmem_pos)
+            #print(f"{self.name}: SUCCESS / time: {sim_time()}")
+        elif self.local_meas_OK and self.local_qcount > self.remote_qcount:
+            # Need to wait for latest remote status
+            pass
+        else:
+            # FAILURE
+            self._handle_fail()
+            self.send_signal(Signals.FAIL, self.local_qcount)
+            #print(f"{self.name}: FAIL / time: {sim_time()}")
+
+    def _handle_fail(self):
+        if self.node.qmemory.mem_positions[self._qmem_pos].in_use:
+            self.node.qmemory.pop(positions=[self._qmem_pos])
 
     @property
     def is_connected(self):
@@ -199,7 +175,7 @@ class Distil(NodeProtocol):
             return False
         if not self.check_assigned(self.node, Node):
             return False
-        if self.node.qmemory.num_positions < 2:
+        if self.node.qmemory.num_positions < 1:
             return False
         return True
 
@@ -294,32 +270,91 @@ class Correction(NodeProtocol):
                 meas_results = None
 
 
-class DistilExample(LocalProtocol):
-    def __init__(self, node_a, node_b, num_runs):
-        super().__init__(nodes={"A": node_a, "B": node_b}, name="Distil example")
+class FilteringExample(LocalProtocol):
+    r"""Protocol for a complete filtering experiment.
+
+    Combines the sub-protocols:
+    - :py:class:`~netsquid.examples.entanglenodes.EntangleNodes`
+    - :py:class:`~netsquid.examples.purify.Filter`
+
+    Will run for specified number of times then stop, recording results after each run.
+
+    Parameters
+    ----------
+    node_a : :py:class:`~netsquid.nodes.node.Node`
+        Must be specified before protocol can start.
+    node_b : :py:class:`~netsquid.nodes.node.Node`
+        Must be specified before protocol can start.
+    num_runs : int
+        Number of successful runs to do.
+    epsilon : float
+        Parameter used in filter's measurement operator.
+
+    Attributes
+    ----------
+    results : :py:obj:`dict`
+        Dictionary containing results. Results are :py:class:`numpy.array`\s.
+        Results keys are *F2*, *pairs*, and *time*.
+
+    Subprotocols
+    ------------
+    entangle_A : :class:`~netsquid.examples.entanglenodes.EntangleNodes`
+        Entanglement generation protocol running on node A.
+    entangle_B : :class:`~netsquid.examples.entanglenodes.EntangleNodes`
+        Entanglement generation protocol running on node B.
+    purify_A : :class:`~netsquid.examples.purify.Filter`
+        Purification protocol running on node A.
+    purify_B : :class:`~netsquid.examples.purify.Filter`
+        Purification protocol running on node B.
+
+    Notes
+    -----
+        The filter purification does not support the stabilizer formalism.
+
+    """
+
+    def __init__(self, node_a, node_b, num_runs, epsilon=0.9):
+        super().__init__(nodes={"A": node_a, "B": node_b}, name="Filtering example")
+        self._epsilon = epsilon
         self.num_runs = num_runs
+        # Initialise sub-protocols
         self.add_subprotocol(EntangleNodes(node=node_a, role="source", input_mem_pos=0,
-                                           num_pairs=2, name="entangle_A"))
+                                           num_pairs=1, name="entangle_A"))
         self.add_subprotocol(
-            EntangleNodes(node=node_b, role="receiver", input_mem_pos=0, num_pairs=2,
+            EntangleNodes(node=node_b, role="receiver", input_mem_pos=0, num_pairs=1,
                           name="entangle_B"))
-        self.add_subprotocol(Distil(node_a, node_a.ports["cout_bob_dis"], role="A", name="purify_A"))
-        self.add_subprotocol(Distil(node_b, node_b.ports["cin_alice_dis"], role="B", name="purify_B"))
+        self.add_subprotocol(Filter(node_a, node_a.ports["cout_bob_fil"],
+                                    epsilon=epsilon, name="purify_A1"))
+        self.add_subprotocol(Filter(node_b, node_b.ports["cin_alice_fil"],
+                                    epsilon=epsilon, name="purify_B1"))
+        self.add_subprotocol(Filter(node_a, node_a.ports["cout_bob_dis"],
+                                    epsilon=epsilon, name="purify_A2"))
+        self.add_subprotocol(Filter(node_b, node_b.ports["cin_alice_dis"],
+                                    epsilon=epsilon, name="purify_B2"))
         self.add_subprotocol(BellMeasurement(node=node_a, port=node_a.ports["cout_bob"], name="teleport_A"))
         self.add_subprotocol(Correction(node=node_b, name="teleport_B"))
-        self.subprotocols["purify_A"].start_expression = (
-            self.subprotocols["purify_A"].await_signal(self.subprotocols["entangle_A"],
+        # Set start expressions
+        self.subprotocols["purify_A1"].start_expression = (
+            self.subprotocols["purify_A1"].await_signal(self.subprotocols["entangle_A"],
                                                        Signals.SUCCESS))
-        self.subprotocols["purify_B"].start_expression = (
-            self.subprotocols["purify_B"].await_signal(self.subprotocols["entangle_B"],
+        self.subprotocols["purify_B1"].start_expression = (
+            self.subprotocols["purify_B1"].await_signal(self.subprotocols["entangle_B"],
+                                                       Signals.SUCCESS))
+        self.subprotocols["purify_A2"].start_expression = (
+            self.subprotocols["purify_A2"].await_signal(self.subprotocols["purify_A1"],
+                                                       Signals.SUCCESS))
+        self.subprotocols["purify_B2"].start_expression = (
+            self.subprotocols["purify_B2"].await_signal(self.subprotocols["purify_B1"],
                                                        Signals.SUCCESS))
         start_expr_ent_A = (self.subprotocols["entangle_A"].await_signal(
-                            self.subprotocols["purify_A"], Signals.FAIL) |
+                            self.subprotocols["purify_A1"], Signals.FAIL) |
+                            self.subprotocols["entangle_A"].await_signal(
+                            self.subprotocols["purify_A2"], Signals.FAIL) |
                             self.subprotocols["entangle_A"].await_signal(
                                 self, Signals.WAITING))
         self.subprotocols["entangle_A"].start_expression = start_expr_ent_A
-        self.subprotocols["teleport_A"].start_expression = self.subprotocols["teleport_A"].await_signal(self.subprotocols["purify_A"], Signals.SUCCESS)
-        self.subprotocols["teleport_B"].start_expression = self.subprotocols["teleport_B"].await_signal(self.subprotocols["purify_B"], Signals.SUCCESS)
+        self.subprotocols["teleport_A"].start_expression = self.subprotocols["teleport_A"].await_signal(self.subprotocols["purify_A2"], Signals.SUCCESS)
+        self.subprotocols["teleport_B"].start_expression = self.subprotocols["teleport_B"].await_signal(self.subprotocols["purify_B2"], Signals.SUCCESS)
 
     def run(self):
         self.start_subprotocols()
@@ -412,7 +447,7 @@ def example_sim_setup(node_a, node_b, num_runs):
         Dataframe of collected data.
 
     """
-    filt_example = DistilExample(node_a, node_b, num_runs=num_runs)
+    filt_example = FilteringExample(node_a, node_b, num_runs=num_runs, epsilon=0.9)
 
     def record_run(evexpr):
         # Callback that collects data each run
@@ -423,6 +458,7 @@ def example_sim_setup(node_a, node_b, num_runs):
         node_a.qmemory.pop(positions=[result["pos_A1"]])
         q_B, = node_b.qmemory.pop(positions=[result["pos_B"]])
         f2 = qapi.fidelity(q_B, ks.y0, squared=True)
+        #print(f"{result["time"]}: pairs = {result["pairs"]}, fidelity = {f2}")
         return {"F2": f2, "pairs": result["pairs"], "time": result["time"]}
 
     dc = DataCollector(record_run, include_time_stamp=False,
@@ -432,37 +468,37 @@ def example_sim_setup(node_a, node_b, num_runs):
     return filt_example, dc
 
 
-def run_experiment(node_distances):
+def run_experiment(source_fidelity):
     fidelity_data = pandas.DataFrame()
-    for node_distance in node_distances:
+    for source_fidelity_sq in source_fidelity:
         ns.sim_reset()
-        network = example_network_setup(node_distance=node_distance)
+        network = example_network_setup(source_fidelity_sq=source_fidelity_sq)
         node_a = network.get_node("node_A")
         node_b = network.get_node("node_B")
         example, dc = example_sim_setup(node_a, node_b, 1000)
         example.start()
         ns.sim_run()
         df = dc.dataframe
-        df['node_distance'] = node_distance
+        df['source_fidelity'] = source_fidelity_sq
         fidelity_data = pandas.concat([fidelity_data, df])
     return fidelity_data
 
 
 def create_plot():
     matplotlib.use('Agg')
-    node_distances = [1 + i for i in range(0, 100, 5)]
-    fidelities = run_experiment(node_distances)
+    source_fidelity = [0.1 * i for i in range(0, 11, 1)]
+    fidelities = run_experiment(source_fidelity)
     plot_style = {'kind': 'scatter', 'grid': True,
-                  'title': "Fidelity of the teleported quantum state with distil"}
-    data = fidelities.groupby("node_distance")['F2'].agg(
+                  'title': "Fidelity of the teleported quantum state with filtering"}
+    data = fidelities.groupby("source_fidelity")['F2'].agg(
         fidelity='mean', sem='sem').reset_index()
-    save_dir = "./plots_clean/node1500"
-    existing_files = len([f for f in os.listdir(save_dir) if f.startswith("Distil_Teleportation")])
-    filename = f"{save_dir}/Distil_Teleportation fidelity_{existing_files + 1}.png"
-    data.plot(x='node_distance', y='fidelity', yerr='sem', **plot_style)
+    save_dir = "./plots_clean/sf1500"
+    existing_files = len([f for f in os.listdir(save_dir) if f.startswith("Filtering2_Teleportation")])
+    filename = f"{save_dir}/Filtering2_Teleportation fidelity_{existing_files + 1}.png"
+    data.plot(x='source_fidelity', y='fidelity', yerr='sem', **plot_style)
     plt.savefig(filename)
     print(f"Plot saved as {filename}")
-    fidelities.to_csv(f"{save_dir}/Distil_Teleportation fidelity_{existing_files + 2}.csv")
+    fidelities.to_csv(f"{save_dir}/Filtering2_Teleportation fidelity_{existing_files + 2}.csv")
 
 
 if __name__ == "__main__":
@@ -470,5 +506,5 @@ if __name__ == "__main__":
     #filt_example, dc = example_sim_setup(network.get_node("node_A"),network.get_node("node_B"),num_runs=1)
     #filt_example.start()
     #ns.sim_run()
-    #print("Average fidelity of generated entanglement with distil: {}".format(dc.dataframe["F2"].mean()))
+    #print("Average fidelity of generated entanglement with filtering: {}".format(dc.dataframe["F2"].mean()))
     create_plot()

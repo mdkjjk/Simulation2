@@ -5,6 +5,8 @@ import pandas
 import matplotlib, os
 import math
 from matplotlib import pyplot as plt
+import noise
+from noise import AmplitudeNoiseModel, PhaseNoiseModel
 
 from netsquid.qubits import operators as ops
 from netsquid.qubits import qubitapi as qapi

@@ -5,6 +5,8 @@ import pandas
 import matplotlib, os
 import math
 from matplotlib import pyplot as plt
+import noise
+from noise import AmplitudeNoiseModel, PhaseNoiseModel
 
 from netsquid.qubits import operators as ops
 from netsquid.qubits import qubitapi as qapi
@@ -35,63 +37,6 @@ from netsquid.examples.entanglenodes import EntangleNodes
 from pydynaa import EventExpression
 
 ns.set_qstate_formalism(QFormalism.DM)
-
-# 時間依存振幅減衰ノイズ
-def delay_amplitude_dampen(qubit, gamma, delay):
-    if gamma < 0:
-        raise ValueError(f"damp_rate {gamma} should be non-negative.")
-
-    # γ = 1 - exp(-Rt)
-    damp_rate = 1. - math.exp(- delay * gamma * 1e-9)
-
-    # 振幅減衰を適用
-    qapi.amplitude_dampen(qubit, damp_rate)
-
-    return damp_rate
-
-# 振幅減衰ノイズモデル
-class AmplitudeNoiseModel(QuantumErrorModel):
-    def __init__(self, gamma, time_independent=False, **kwargs):
-        super().__init__(**kwargs)
-        # NOTE time independence should be set *before* the rate
-        self.add_property('time_independent', time_independent, value_type=bool)
-
-        def gamma_constraint(value):
-            if self.time_independent and not 0 <= value <= 1:
-                return False
-            elif value < 0:
-                return False
-            return True
-        self.add_property('gamma', gamma,
-                          value_type=(int, float),
-                          value_constraints=ValueConstraint(gamma_constraint))
-    
-    @property
-    def gamma(self):
-        return self.properties['gamma']
-    
-    @gamma.setter
-    def gamma(self, value):
-        self.properties['gamma'] = value
-
-    @property
-    def time_independent(self):
-        """bool: Whether the probability of depolarizing is time independent."""
-        return self.properties['time_independent']
-
-    @time_independent.setter
-    def time_independent(self, value):
-        self.properties['time_independent'] = value
-    
-    def error_operation(self, qubits, delta_time=0, **kwargs):
-        if self.time_independent:   # 時間非依存
-            for qubit in qubits:
-                if qubit is not None:
-                    qapi.amplitude_dampen(qubit, gamma)
-        else:                       # 時間依存
-            for qubit in qubits:
-                if qubit is not None:
-                    delay_amplitude_dampen(qubit, gamma=self.gamma, delay=delta_time)
 
 class LocalEntangle(NodeProtocol):
     def __init__(self, node, qsource_name, start_expression=None, 
