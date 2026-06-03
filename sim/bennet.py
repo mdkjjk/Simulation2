@@ -4,6 +4,8 @@ import pydynaa as pd
 import pandas
 import matplotlib, os
 from matplotlib import pyplot as plt
+import noise
+from noise import AmplitudeNoiseModel, PhaseNoiseModel
 
 from netsquid.qubits import operators as ops
 from netsquid.qubits import qubitapi as qapi
@@ -46,6 +48,7 @@ class Bennet(NodeProtocol):
         self._rotprog = self._rotate_program()
         self._measprog = self._measure_program()
         self._reprog = self._reverse_program()
+        self.num_runs = 0
         self.local_qcount = 0
         self.local_meas_result = None
         self.remote_qcount = 0
@@ -124,6 +127,8 @@ class Bennet(NodeProtocol):
             yield from self._node_do_bennet()
         # 1つ目のエンタングルメントが到着した場合
         else:
+            self.num_runs += 1
+            #print(f"{self.name}: Sim {self.num_runs}")
             # Pop previous qubit if present:
             pop_positions = [p for p in self._qmem_positions if p is not None and p != memory_position]
             if len(pop_positions) > 0:
@@ -154,12 +159,13 @@ class Bennet(NodeProtocol):
                 self.local_meas_result is not None and
                 self.remote_meas_result is not None):
             if self.local_meas_result == self.remote_meas_result:
-                self.send_signal(Signals.SUCCESS, self._qmem_positions[1])
+                self.send_signal(Signals.SUCCESS, [self._qmem_positions[1], self.num_runs])
                 #print(f"{self.name}: SUCCESS / time: {sim_time()}")
+                self.num_runs = 0
             else:
                 self._clear_qmem_positions()
                 self.send_signal(Signals.FAIL, self.local_qcount)
-                #print(f"{self.name}: FAIL / time: {sim_time()}")
+                #print(f"{self.name}: FAIL")
             self.local_meas_result = None
             self.remote_meas_result = None
             self._qmem_positions = [None, None]
@@ -176,7 +182,7 @@ class Bennet(NodeProtocol):
             return False
         return True
 
-def network_setup(source_delay=1e5, source_fidelity_sq=0.9, fidelity=0.7,depolar_rate=500, node_distance=1000):
+def network_setup(source_delay=1e5, source_fidelity_sq=0.9, fidelity=0.7,depolar_rate=100, node_distance=1000):
     network = Network("bennet_network")
 
     # ノード設定
@@ -241,6 +247,7 @@ class BennetExample(LocalProtocol):
     def run(self):
         self.start_subprotocols()
         for i in range(self.num_runs):
+            #print(f"Simulation {i}")
             start_time = sim_time()
             self.subprotocols["entangle_A"].entangled_pairs = 0
             self.send_signal(Signals.WAITING)
@@ -249,10 +256,11 @@ class BennetExample(LocalProtocol):
             signal_A = self.subprotocols["bennet_A"].get_signal_result(Signals.SUCCESS, self)
             signal_B = self.subprotocols["bennet_B"].get_signal_result(Signals.SUCCESS, self)                                                     
             result = {
-                "pos_A": signal_A,
-                "pos_B": signal_B,
+                "pos_A": signal_A[0],
+                "pos_B": signal_B[0],
                 "time": sim_time() - start_time,
                 "pairs": self.subprotocols["entangle_A"].entangled_pairs,
+                "runs": signal_A[1]
             }
             self.send_signal(Signals.SUCCESS, result)
 
@@ -263,12 +271,14 @@ def sim_setup(node_a, node_b, num_runs):
         # Callback that collects data each run
         protocol = evexpr.triggered_events[-1].source
         result = protocol.get_signal_result(Signals.SUCCESS)
+        #print(result)
         # Record fidelity
         q_A, = node_a.qmemory.pop(positions=[result["pos_A"]])
         q_B, = node_b.qmemory.pop(positions=[result["pos_B"]])
         #print(qapi.reduced_dm([q_A, q_B]))
         f2 = qapi.fidelity([q_A, q_B], ks.b11, squared=True)
-        return {"F2": f2, "pairs": result["pairs"], "time": result["time"]}
+        prob = 1 / result["runs"]
+        return {"F2": f2, "pairs": result["pairs"], "probability": prob, "time": result["time"]}
 
     dc = DataCollector(record_run, include_time_stamp=False,
                        include_entity_name=False)
@@ -291,27 +301,61 @@ def run_experiment(node_distances):
         fidelity_data = pandas.concat([fidelity_data, df])
     return fidelity_data
 
+def save_plot(datas, column, title, prefix):
+    plot_style = {
+        'kind': 'scatter',
+        'grid': True,
+        'title': title
+    }
+    data = datas.groupby("node_distance")[column].agg(
+        mean='mean', sem='sem').reset_index()
+    save_dir = "./plots_test"
+    count = len([f for f in os.listdir(save_dir)
+                 if f.startswith(prefix)])
+    filename = f"{save_dir}/{prefix}_{count + 1}.png"
+    data.plot(
+        x='node_distance',
+        y='mean',
+        yerr='sem',
+        **plot_style
+    )
+    plt.savefig(filename)
+    plt.close()
+    print(f"Plot saved as {filename}")
+
 def create_plot():
     matplotlib.use('Agg')
     node_distances = [1 + i for i in range(0, 1000, 100)]
-    fidelities = run_experiment(node_distances)
-    plot_style = {'kind': 'scatter', 'grid': True,
-                'title': "Fidelity of the teleported quantum state with bennet"}
-    data = fidelities.groupby("node_distance")['F2'].agg(
-        fidelity='mean', sem='sem').reset_index()
+    datas = run_experiment(node_distances)
+    save_plot(
+        datas,
+        column="F2",
+        title="Fidelity of the teleported quantum state with bennet",
+        prefix="Bennet fidelity"
+    )
+    save_plot(
+        datas,
+        column="probability",
+        title="Probability of success - bennet",
+        prefix="Bennet probability"
+    )
+    save_plot(
+        datas,
+        column="pairs",
+        title="Number of entanglement pairs used with bennet",
+        prefix="Bennet pairs"
+    )
     save_dir = "./plots_test"
-    existing_files1 = len([f for f in os.listdir(save_dir) if f.startswith("Bennet fidelity")])
-    filename = f"{save_dir}/Bennet fidelity_{existing_files1 + 1}.png"
-    data.plot(x='node_distance', y='fidelity', yerr='sem', **plot_style)
-    plt.savefig(filename)
-    print(f"Plot saved as {filename}")
-    existing_files2 = len([f for f in os.listdir(save_dir) if f.startswith("Bennet result")])
-    fidelities.to_csv(f"{save_dir}/Bennet result_{existing_files2 + 1}.csv")
+    count = len([f for f in os.listdir(save_dir)
+                 if f.startswith("Bennet result")])
+    datas.to_csv(f"{save_dir}/Bennet result_{count + 1}.csv",)
 
 if __name__ == "__main__":
     #network = network_setup()
-    #be_example, dc = sim_setup(network.get_node("node_A"), network.get_node("node_B"), num_runs=1)
+    #be_example, dc = sim_setup(network.get_node("node_A"), network.get_node("node_B"), num_runs=10)
     #be_example.start()
     #ns.sim_run()
     #print("Average fidelity of generated entanglement with bennet: {}".format(dc.dataframe["F2"].mean()))
+    #print("Average resource with bennet: {}".format(dc.dataframe["pairs"].mean()))
+    #print("Average probability of success with bennet: {}".format(dc.dataframe["probability"].mean()))
     create_plot()
