@@ -110,6 +110,7 @@ class Protect(NodeProtocol):   # Alice側のプロトコル
         self.port = port
         # TODO rename this expression to 'qubit input'
         self.start_expression = start_expression
+        self.num_runs = 0
         self.local_qcount = 0
         self.local_meas_result = None
         self.remote_qcount = 0
@@ -153,6 +154,8 @@ class Protect(NodeProtocol):   # Alice側のプロトコル
         return super().start()
 
     def _handle_qubit_rx(self):
+        self.num_runs += 1
+        #print(f"{self.name}: Sim {self.num_runs}")
         pos1, pos2 = self._qmem_positions
         if self.node.qmemory.busy:
             yield self.await_program(self.node.qmemory)
@@ -188,9 +191,9 @@ class Protect(NodeProtocol):   # Alice側のプロトコル
             self.local_meas_result = None
             self.remote_meas_result = None
         else:
-            self.send_signal(Signals.SUCCESS, self._qmem_positions[0])
+            self.send_signal(Signals.SUCCESS, [self._qmem_positions[0], self.num_runs])
             #print(f"{self.name}: SUCCESS")
-
+            self.num_runs = 0
 
     def _handle_fail(self):
         positions = [pos for pos in self._qmem_positions if pos is not None]
@@ -375,10 +378,11 @@ class ProtectExample(LocalProtocol):
             signal_A = self.subprotocols["protect_A"].get_signal_result(Signals.SUCCESS, self)
             signal_B = self.subprotocols["rwmeasure_B"].get_signal_result(Signals.SUCCESS, self)
             result = {
-                "pos_A": signal_A,
+                "pos_A": signal_A[0],
                 "pos_B": signal_B,
                 "time": sim_time() - start_time,
                 "pairs": self.subprotocols["entangle_A"].entangled_pairs,
+                "runs": signal_A[1]
             }
             self.send_signal(Signals.SUCCESS, result)
 
@@ -389,12 +393,14 @@ def sim_setup(node_a, node_b, num_runs, omega, theta):
         # Callback that collects data each run
         protocol = evexpr.triggered_events[-1].source
         result = protocol.get_signal_result(Signals.SUCCESS)
+        #print(result)
         # Record fidelity
         q_A, = node_a.qmemory.pop(positions=[result["pos_A"]])
         q_B, = node_b.qmemory.pop(positions=[result["pos_B"]])
         #print(qapi.reduced_dm([q_A, q_B]))
         f2 = qapi.fidelity([q_A, q_B], ks.b00, squared=True)
-        return {"F2": f2, "pairs": result["pairs"], "time": result["time"]}
+        prob = 1 / result["runs"]
+        return {"F2": f2, "pairs": result["pairs"], "probability": prob, "time": result["time"]}
 
     dc = DataCollector(record_run, include_time_stamp=False,
                        include_entity_name=False)
@@ -402,42 +408,89 @@ def sim_setup(node_a, node_b, num_runs, omega, theta):
                                      event_type=Signals.SUCCESS.value))
     return pro_example, dc
 
-def run_experiment(variables):
+def run_experiment(var_o, var_t):
     fidelity_data = pandas.DataFrame()
-    for omega in variables:
-        ns.sim_reset()
-        network = network_setup()
-        node_a = network.get_node("node_A")
-        node_b = network.get_node("node_B")
-        pro_example, dc = sim_setup(node_a, node_b, 100, omega, 0.2)
-        pro_example.start()
-        ns.sim_run()
-        df = dc.dataframe
-        df['omega'] = omega
-        fidelity_data = pandas.concat([fidelity_data, df])
+    for omega in var_o:
+        for theta in var_t:
+            ns.sim_reset()
+            network = network_setup()
+            node_a = network.get_node("node_A")
+            node_b = network.get_node("node_B")
+            pro_example, dc = sim_setup(node_a, node_b, 3, omega, theta)
+            pro_example.start()
+            ns.sim_run()
+            df = dc.dataframe
+            df['omega'] = omega
+            df['theta'] = theta
+            fidelity_data = pandas.concat([fidelity_data, df])
     return fidelity_data
+
+def save_heatmap(dataframe, value_col, title, colorbar_label, filename_prefix, var_o, var_t):
+    data = dataframe.groupby(["omega", "theta"])[value_col].mean().reset_index()
+    heatmap_data = data.pivot(index='theta', columns='omega', values=value_col)
+    plt.figure(figsize=(8, 6))
+    im = plt.imshow(heatmap_data, origin='lower', aspect='auto',
+                    extent=[
+                        min(var_o), max(var_o),
+                        min(var_t), max(var_t)
+                    ]
+    )
+    plt.colorbar(im, label=colorbar_label)
+    plt.xlabel(r'WM strength $\omega$')
+    plt.ylabel(r'WMR strength $\theta$')
+    plt.title(title)
+    save_dir = "./plots_test"
+    count = len([f for f in os.listdir(save_dir) if f.startswith(filename_prefix)])
+    filename = f"{save_dir}/{filename_prefix}_{count + 1}.png"
+    plt.savefig(filename)
+    plt.close()
+    print(f"Plot saved as {filename}")
 
 def create_plot():
     matplotlib.use('Agg')
-    variables = [i for i in np.arange(0.0, np.pi/2, np.pi/12)]
-    fidelities = run_experiment(variables)
-    plot_style = {'kind': 'scatter', 'grid': True,
-                'title': "Fidelity of the entanglement with weak measurement"}
-    data = fidelities.groupby("omega")['F2'].agg(
-        fidelity='mean', sem='sem').reset_index()
+    var_o = [i for i in np.arange(0.0, np.pi/2, np.pi/12)]
+    var_t = [i for i in np.arange(0.0, 1.0, 0.2)]
+    datas = run_experiment(var_o, var_t)
+    # 忠実度
+    save_heatmap(
+        datas,
+        value_col="F2",
+        title="Fidelity Heatmap with protection",
+        colorbar_label="Average Fidelity",
+        filename_prefix="Protect fidelity",
+        var_o=var_o,
+        var_t=var_t
+    )
+    # 成功確率
+    save_heatmap(
+        datas,
+        value_col="probability",
+        title="Success Probability Heatmap with protection",
+        colorbar_label="Average Success Probability",
+        filename_prefix="Protect probability",
+        var_o=var_o,
+        var_t=var_t
+    )
+    # エンタングルメントペア消費数
+    save_heatmap(
+        datas,
+        value_col="pairs",
+        title="Entanglement Pair Usage Heatmap with protection",
+        colorbar_label="Average Number of Pairs",
+        filename_prefix="Protect pairs",
+        var_o=var_o,
+        var_t=var_t
+    )
     save_dir = "./plots_test"
-    existing_files1 = len([f for f in os.listdir(save_dir) if f.startswith("WM fidelity")])
-    filename = f"{save_dir}/WM fidelity_{existing_files1 + 1}.png"
-    data.plot(x='omega', y='fidelity', yerr='sem', **plot_style)
-    plt.savefig(filename)
-    print(f"Plot saved as {filename}")
-    existing_files2 = len([f for f in os.listdir(save_dir) if f.startswith("WM result")])
-    fidelities.to_csv(f"{save_dir}/WM result_{existing_files2 + 1}.csv")
-
+    count = len([f for f in os.listdir(save_dir) if f.startswith("Protect result")])
+    datas.to_csv(f"{save_dir}/Protect result_{count + 1}.csv")
+        
 if __name__ == "__main__":
     #network = network_setup()
-    #pro_example, dc = sim_setup(network.get_node("node_A"), network.get_node("node_B"), 1)
+    #pro_example, dc = sim_setup(network.get_node("node_A"), network.get_node("node_B"), 5, np.pi/3, 0.2)
     #pro_example.start()
     #ns.sim_run()
-    #print("Average fidelity of generated entanglement with WM: {}".format(dc.dataframe["F2"].mean()))
+    #print("Average fidelity of generated entanglement with protection: {}".format(dc.dataframe["F2"].mean()))
+    #print("Average resource with protection: {}".format(dc.dataframe["pairs"].mean()))
+    #print("Average probability of success with protection: {}".format(dc.dataframe["probability"].mean()))
     create_plot()
