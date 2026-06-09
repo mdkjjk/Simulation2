@@ -74,6 +74,7 @@ class Filter(NodeProtocol):
         self.port = port
         # TODO rename this expression to 'qubit input'
         self.start_expression = start_expression
+        self.num_runs = 0
         self.local_qcount = 0
         self.local_meas_OK = False
         self.remote_qcount = 0
@@ -128,6 +129,8 @@ class Filter(NodeProtocol):
         # Handle incoming Qubit on this node.
         if self.node.qmemory.busy:
             yield self.await_program(self.node.qmemory)
+        self.num_runs += 1
+        #print(f"{self.name}: Sim {self.num_runs}")
         # Retrieve Qubit from input store
         output = self.node.qmemory.execute_instruction(INSTR_MEASURE, [self._qmem_pos], meas_operators=self.meas_ops)[0]
         if self.node.qmemory.busy:
@@ -152,8 +155,9 @@ class Filter(NodeProtocol):
         if (self.local_qcount > 0 and self.local_qcount == self.remote_qcount and
                 self.local_meas_OK and self.remote_meas_OK):
             # SUCCESS!
-            self.send_signal(Signals.SUCCESS, self._qmem_pos)
+            self.send_signal(Signals.SUCCESS, [self._qmem_pos, self.num_runs])
             #print(f"{self.name}: SUCCESS / time: {sim_time()}")
+            self.num_runs = 0
         elif self.local_meas_OK and self.local_qcount > self.remote_qcount:
             # Need to wait for latest remote status
             pass
@@ -214,7 +218,7 @@ class BellMeasurement(NodeProtocol):
             entanglement_ready = True
             source_protocol = expr_port.atomic_source
             ready_signal = source_protocol.get_signal_by_event(event=expr_port.triggered_events[0], receiver=self)
-            self._qmem_pos1 = ready_signal.result
+            self._qmem_pos1 = ready_signal.result[0]
             #print(f"{self.name}: Entanglement received at {self._qmem_pos1} / time: {sim_time()}")
             self._qmem_pos0 = self.node.qmemory.unused_positions[0]
             self.node.qmemory.execute_program(qubit_init_program, qubit_mapping=[self._qmem_pos0])
@@ -256,7 +260,7 @@ class Correction(NodeProtocol):
                 entanglement_ready = True
                 source_protocol = expr.second_term.atomic_source
                 ready_signal = source_protocol.get_signal_by_event(event=expr.second_term.triggered_events[-1], receiver=self)
-                self._qmem_pos = ready_signal.result
+                self._qmem_pos = ready_signal.result[0]
                 #print(f"{self.name}: Entanglement received at {self._qmem_pos} / time: {sim_time()}")
             if meas_results is not None and entanglement_ready:
                 # Do corrections (blocking)
@@ -327,10 +331,6 @@ class FilteringExample(LocalProtocol):
                                     epsilon=epsilon, name="purify_A1"))
         self.add_subprotocol(Filter(node_b, node_b.ports["cin_alice_fil"],
                                     epsilon=epsilon, name="purify_B1"))
-        self.add_subprotocol(Filter(node_a, node_a.ports["cout_bob_dis"],
-                                    epsilon=epsilon, name="purify_A2"))
-        self.add_subprotocol(Filter(node_b, node_b.ports["cin_alice_dis"],
-                                    epsilon=epsilon, name="purify_B2"))
         self.add_subprotocol(BellMeasurement(node=node_a, port=node_a.ports["cout_bob"], name="teleport_A"))
         self.add_subprotocol(Correction(node=node_b, name="teleport_B"))
         # Set start expressions
@@ -340,21 +340,13 @@ class FilteringExample(LocalProtocol):
         self.subprotocols["purify_B1"].start_expression = (
             self.subprotocols["purify_B1"].await_signal(self.subprotocols["entangle_B"],
                                                        Signals.SUCCESS))
-        self.subprotocols["purify_A2"].start_expression = (
-            self.subprotocols["purify_A2"].await_signal(self.subprotocols["purify_A1"],
-                                                       Signals.SUCCESS))
-        self.subprotocols["purify_B2"].start_expression = (
-            self.subprotocols["purify_B2"].await_signal(self.subprotocols["purify_B1"],
-                                                       Signals.SUCCESS))
         start_expr_ent_A = (self.subprotocols["entangle_A"].await_signal(
                             self.subprotocols["purify_A1"], Signals.FAIL) |
                             self.subprotocols["entangle_A"].await_signal(
-                            self.subprotocols["purify_A2"], Signals.FAIL) |
-                            self.subprotocols["entangle_A"].await_signal(
                                 self, Signals.WAITING))
         self.subprotocols["entangle_A"].start_expression = start_expr_ent_A
-        self.subprotocols["teleport_A"].start_expression = self.subprotocols["teleport_A"].await_signal(self.subprotocols["purify_A2"], Signals.SUCCESS)
-        self.subprotocols["teleport_B"].start_expression = self.subprotocols["teleport_B"].await_signal(self.subprotocols["purify_B2"], Signals.SUCCESS)
+        self.subprotocols["teleport_A"].start_expression = self.subprotocols["teleport_A"].await_signal(self.subprotocols["purify_A1"], Signals.SUCCESS)
+        self.subprotocols["teleport_B"].start_expression = self.subprotocols["teleport_B"].await_signal(self.subprotocols["purify_B1"], Signals.SUCCESS)
 
     def run(self):
         self.start_subprotocols()
@@ -365,6 +357,9 @@ class FilteringExample(LocalProtocol):
             self.send_signal(Signals.WAITING)
             yield (self.await_signal(self.subprotocols["teleport_A"], Signals.SUCCESS) &
                    self.await_signal(self.subprotocols["teleport_B"], Signals.SUCCESS))
+            signal_A_pur = self.subprotocols["purify_A1"].get_signal_result(Signals.SUCCESS,
+                                                                       self)
+            result_pur = {"runs": signal_A_pur[1]}
             signal_A = self.subprotocols["teleport_A"].get_signal_result(Signals.SUCCESS,
                                                                        self)
             signal_B = self.subprotocols["teleport_B"].get_signal_result(Signals.SUCCESS,
@@ -376,7 +371,7 @@ class FilteringExample(LocalProtocol):
                 "time": sim_time() - start_time,
                 "pairs": self.subprotocols["entangle_A"].entangled_pairs,
             }
-            self.send_signal(Signals.SUCCESS, result)
+            self.send_signal(Signals.SUCCESS, [result, result_pur])
             #print(f"Simulation {i}: Finish")
 
 
@@ -420,7 +415,7 @@ def example_network_setup(source_delay=1e5, source_fidelity_sq=0.8, depolar_rate
                            port_name_node1="cout_bob", port_name_node2="cin_alice")
     # node_A.connect_to(node_B, conn_cchannel)
     qchannel = QuantumChannel("QChannel_A->B", length=node_distance,
-                              models={"quantum_noise_model": DepolarNoiseModel(depolar_rate),
+                              models={"quantum_noise_model": AmplitudeNoiseModel(gamma=depolar_rate),
                                       "delay_model": FibreDelayModel(c=200e3)},
                               depolar_rate=0)
     port_name_a, port_name_b = network.add_connection(
@@ -454,12 +449,13 @@ def example_sim_setup(node_a, node_b, num_runs):
         protocol = evexpr.triggered_events[-1].source
         result = protocol.get_signal_result(Signals.SUCCESS)
         # Record fidelity
-        node_a.qmemory.pop(positions=[result["pos_A0"]])
-        node_a.qmemory.pop(positions=[result["pos_A1"]])
-        q_B, = node_b.qmemory.pop(positions=[result["pos_B"]])
+        node_a.qmemory.pop(positions=[result[0]["pos_A0"]])
+        node_a.qmemory.pop(positions=[result[0]["pos_A1"]])
+        q_B, = node_b.qmemory.pop(positions=[result[0]["pos_B"]])
         f2 = qapi.fidelity(q_B, ks.y0, squared=True)
+        prob = 1 / result[1]["runs"]
         #print(f"{result["time"]}: pairs = {result["pairs"]}, fidelity = {f2}")
-        return {"F2": f2, "pairs": result["pairs"], "time": result["time"]}
+        return {"F2": f2, "pairs": result[0]["pairs"], "probability": prob, "time": result[0]["time"]}
 
     dc = DataCollector(record_run, include_time_stamp=False,
                        include_entity_name=False)
@@ -468,43 +464,76 @@ def example_sim_setup(node_a, node_b, num_runs):
     return filt_example, dc
 
 
-def run_experiment(source_fidelity):
+def run_experiment(node_distances):
     fidelity_data = pandas.DataFrame()
-    for source_fidelity_sq in source_fidelity:
+    for node_distance in node_distances:
         ns.sim_reset()
-        network = example_network_setup(source_fidelity_sq=source_fidelity_sq)
+        network = example_network_setup(node_distance=node_distance)
         node_a = network.get_node("node_A")
         node_b = network.get_node("node_B")
-        example, dc = example_sim_setup(node_a, node_b, 1000)
+        example, dc = example_sim_setup(node_a, node_b, 100)
         example.start()
         ns.sim_run()
         df = dc.dataframe
-        df['source_fidelity'] = source_fidelity_sq
+        df['node_distance'] = node_distance
         fidelity_data = pandas.concat([fidelity_data, df])
     return fidelity_data
 
+def save_plot(datas, column, title, prefix):
+    plot_style = {
+        'kind': 'scatter',
+        'grid': True,
+        'title': title
+    }
+    data = datas.groupby("node_distance")[column].agg(
+        mean='mean', sem='sem').reset_index()
+    save_dir = "./plots_test"
+    count = len([f for f in os.listdir(save_dir)
+                 if f.startswith(prefix)])
+    filename = f"{save_dir}/{prefix}_{count + 1}.png"
+    data.plot(
+        x='node_distance',
+        y='mean',
+        yerr='sem',
+        **plot_style
+    )
+    plt.savefig(filename)
+    plt.close()
+    print(f"Plot saved as {filename}")
 
 def create_plot():
     matplotlib.use('Agg')
-    source_fidelity = [0.1 * i for i in range(0, 11, 1)]
-    fidelities = run_experiment(source_fidelity)
-    plot_style = {'kind': 'scatter', 'grid': True,
-                  'title': "Fidelity of the teleported quantum state with filtering"}
-    data = fidelities.groupby("source_fidelity")['F2'].agg(
-        fidelity='mean', sem='sem').reset_index()
-    save_dir = "./plots_clean/sf1500"
-    existing_files = len([f for f in os.listdir(save_dir) if f.startswith("Filtering2_Teleportation")])
-    filename = f"{save_dir}/Filtering2_Teleportation fidelity_{existing_files + 1}.png"
-    data.plot(x='source_fidelity', y='fidelity', yerr='sem', **plot_style)
-    plt.savefig(filename)
-    print(f"Plot saved as {filename}")
-    fidelities.to_csv(f"{save_dir}/Filtering2_Teleportation fidelity_{existing_files + 2}.csv")
+    node_distances = [1 + i for i in range(0, 100, 5)]
+    datas = run_experiment(node_distances)
+    save_plot(
+        datas,
+        column="F2",
+        title="Fidelity of the teleported quantum state with filter",
+        prefix="Filter fidelity"
+    )
+    save_plot(
+        datas,
+        column="probability",
+        title="Probability of success - filter",
+        prefix="Filter probability"
+    )
+    save_plot(
+        datas,
+        column="pairs",
+        title="Number of entanglement pairs used with filter",
+        prefix="Filter pairs"
+    )
+    save_dir = "./plots_test"
+    count = len([f for f in os.listdir(save_dir) if f.startswith("Filter result")])
+    datas.to_csv(f"{save_dir}/Filter result_{count + 1}.csv")
 
 
 if __name__ == "__main__":
     #network = example_network_setup()
-    #filt_example, dc = example_sim_setup(network.get_node("node_A"),network.get_node("node_B"),num_runs=1)
+    #filt_example, dc = example_sim_setup(network.get_node("node_A"),network.get_node("node_B"),num_runs=5)
     #filt_example.start()
     #ns.sim_run()
     #print("Average fidelity of generated entanglement with filtering: {}".format(dc.dataframe["F2"].mean()))
+    #print("Average resource with protection: {}".format(dc.dataframe["pairs"].mean()))
+    #print("Average probability of success with protection: {}".format(dc.dataframe["probability"].mean()))
     create_plot()

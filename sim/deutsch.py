@@ -73,6 +73,7 @@ class Distil(NodeProtocol):
         self.start_expression = start_expression
         self._program = self._setup_dejmp_program(conj_rotation)
         # self.INSTR_ROT = self._INSTR_Rx if not conj_rotation else self._INSTR_RxC
+        self.num_runs = 0
         self.local_qcount = 0
         self.local_meas_result = None
         self.remote_qcount = 0
@@ -142,6 +143,8 @@ class Distil(NodeProtocol):
             self._qmem_positions[1] = memory_position
             #print(f"{self.name}: qmem_positions = {self._qmem_positions}")
             self._waiting_on_second_qubit = False
+            self.num_runs += 1
+            #print(f"{self.name}: Sim {self.num_runs}")
             yield from self._node_do_DEJMPS()
         else:
             # New candidate for first qubit arrived
@@ -180,8 +183,9 @@ class Distil(NodeProtocol):
                 self.remote_meas_result is not None):
             if self.local_meas_result == self.remote_meas_result:
                 # SUCCESS
-                self.send_signal(Signals.SUCCESS, self._qmem_positions[0])
+                self.send_signal(Signals.SUCCESS, [self._qmem_positions[0], self.num_runs])
                 #print(f"{self.name}: SUCCESS / time: {sim_time()}")
+                self.num_runs = 0
             else:
                 # FAILURE
                 self._clear_qmem_positions()
@@ -238,7 +242,7 @@ class BellMeasurement(NodeProtocol):
             entanglement_ready = True
             source_protocol = expr_port.atomic_source
             ready_signal = source_protocol.get_signal_by_event(event=expr_port.triggered_events[0], receiver=self)
-            self._qmem_pos1 = ready_signal.result
+            self._qmem_pos1 = ready_signal.result[0]
             #print(f"{self.name}: Entanglement received at {self._qmem_pos1} / time: {sim_time()}")
             self._qmem_pos0 = self.node.qmemory.unused_positions[0]
             self.node.qmemory.execute_program(qubit_init_program, qubit_mapping=[self._qmem_pos0])
@@ -280,7 +284,7 @@ class Correction(NodeProtocol):
                 entanglement_ready = True
                 source_protocol = expr.second_term.atomic_source
                 ready_signal = source_protocol.get_signal_by_event(event=expr.second_term.triggered_events[-1], receiver=self)
-                self._qmem_pos = ready_signal.result
+                self._qmem_pos = ready_signal.result[0]
                 #print(f"{self.name}: Entanglement received at {self._qmem_pos} / time: {sim_time()}")
             if meas_results is not None and entanglement_ready:
                 # Do corrections (blocking)
@@ -330,18 +334,21 @@ class DistilExample(LocalProtocol):
             self.send_signal(Signals.WAITING)
             yield (self.await_signal(self.subprotocols["teleport_A"], Signals.SUCCESS) &
                    self.await_signal(self.subprotocols["teleport_B"], Signals.SUCCESS))
-            signal_A = self.subprotocols["teleport_A"].get_signal_result(Signals.SUCCESS,
+            signal_A_pur = self.subprotocols["purify_A"].get_signal_result(Signals.SUCCESS,
                                                                        self)
-            signal_B = self.subprotocols["teleport_B"].get_signal_result(Signals.SUCCESS,
+            result_pur = {"runs": signal_A_pur[1]}
+            signal_A_tel = self.subprotocols["teleport_A"].get_signal_result(Signals.SUCCESS,
                                                                        self)
-            result = {
-                "pos_A0": signal_A["pos_A0"],
-                "pos_A1": signal_A["pos_A1"],
-                "pos_B": signal_B,
+            signal_B_tel = self.subprotocols["teleport_B"].get_signal_result(Signals.SUCCESS,
+                                                                       self)
+            result_tel = {
+                "pos_A0": signal_A_tel["pos_A0"],
+                "pos_A1": signal_A_tel["pos_A1"],
+                "pos_B": signal_B_tel,
                 "time": sim_time() - start_time,
                 "pairs": self.subprotocols["entangle_A"].entangled_pairs,
             }
-            self.send_signal(Signals.SUCCESS, result)
+            self.send_signal(Signals.SUCCESS, [result_tel, result_pur])
             #print(f"Simulation {i}: Finish")
 
 
@@ -418,12 +425,14 @@ def example_sim_setup(node_a, node_b, num_runs):
         # Callback that collects data each run
         protocol = evexpr.triggered_events[-1].source
         result = protocol.get_signal_result(Signals.SUCCESS)
+        #print(result)
         # Record fidelity
-        node_a.qmemory.pop(positions=[result["pos_A0"]])
-        node_a.qmemory.pop(positions=[result["pos_A1"]])
-        q_B, = node_b.qmemory.pop(positions=[result["pos_B"]])
+        node_a.qmemory.pop(positions=[result[0]["pos_A0"]])
+        node_a.qmemory.pop(positions=[result[0]["pos_A1"]])
+        q_B, = node_b.qmemory.pop(positions=[result[0]["pos_B"]])
         f2 = qapi.fidelity(q_B, ks.y0, squared=True)
-        return {"F2": f2, "pairs": result["pairs"], "time": result["time"]}
+        prob = 1 / result[1]["runs"]
+        return {"F2": f2, "pairs": result[0]["pairs"], "probability": prob, "time": result[0]["time"]}
 
     dc = DataCollector(record_run, include_time_stamp=False,
                        include_entity_name=False)
@@ -439,7 +448,7 @@ def run_experiment(node_distances):
         network = example_network_setup(node_distance=node_distance)
         node_a = network.get_node("node_A")
         node_b = network.get_node("node_B")
-        example, dc = example_sim_setup(node_a, node_b, 1000)
+        example, dc = example_sim_setup(node_a, node_b, 100)
         example.start()
         ns.sim_run()
         df = dc.dataframe
@@ -447,28 +456,61 @@ def run_experiment(node_distances):
         fidelity_data = pandas.concat([fidelity_data, df])
     return fidelity_data
 
+def save_plot(datas, column, title, prefix):
+    plot_style = {
+        'kind': 'scatter',
+        'grid': True,
+        'title': title
+    }
+    data = datas.groupby("node_distance")[column].agg(
+        mean='mean', sem='sem').reset_index()
+    save_dir = "./plots_test"
+    count = len([f for f in os.listdir(save_dir)
+                 if f.startswith(prefix)])
+    filename = f"{save_dir}/{prefix}_{count + 1}.png"
+    data.plot(
+        x='node_distance',
+        y='mean',
+        yerr='sem',
+        **plot_style
+    )
+    plt.savefig(filename)
+    plt.close()
+    print(f"Plot saved as {filename}")
 
 def create_plot():
     matplotlib.use('Agg')
     node_distances = [1 + i for i in range(0, 100, 5)]
-    fidelities = run_experiment(node_distances)
-    plot_style = {'kind': 'scatter', 'grid': True,
-                  'title': "Fidelity of the teleported quantum state with distil"}
-    data = fidelities.groupby("node_distance")['F2'].agg(
-        fidelity='mean', sem='sem').reset_index()
-    save_dir = "./plots_clean/node1500"
-    existing_files = len([f for f in os.listdir(save_dir) if f.startswith("Distil_Teleportation")])
-    filename = f"{save_dir}/Distil_Teleportation fidelity_{existing_files + 1}.png"
-    data.plot(x='node_distance', y='fidelity', yerr='sem', **plot_style)
-    plt.savefig(filename)
-    print(f"Plot saved as {filename}")
-    fidelities.to_csv(f"{save_dir}/Distil_Teleportation fidelity_{existing_files + 2}.csv")
+    datas = run_experiment(node_distances)
+    save_plot(
+        datas,
+        column="F2",
+        title="Fidelity of the teleported quantum state with deutsch",
+        prefix="Deutsch fidelity"
+    )
+    save_plot(
+        datas,
+        column="probability",
+        title="Probability of success - deutsch",
+        prefix="Deutsch probability"
+    )
+    save_plot(
+        datas,
+        column="pairs",
+        title="Number of entanglement pairs used with deutsch",
+        prefix="Deutsch pairs"
+    )
+    save_dir = "./plots_test"
+    count = len([f for f in os.listdir(save_dir) if f.startswith("Deutsch result")])
+    datas.to_csv(f"{save_dir}/Deutsch result_{count + 1}.csv")
 
 
 if __name__ == "__main__":
     #network = example_network_setup()
-    #filt_example, dc = example_sim_setup(network.get_node("node_A"),network.get_node("node_B"),num_runs=1)
+    #filt_example, dc = example_sim_setup(network.get_node("node_A"),network.get_node("node_B"),num_runs=5)
     #filt_example.start()
     #ns.sim_run()
     #print("Average fidelity of generated entanglement with distil: {}".format(dc.dataframe["F2"].mean()))
+    #print("Average resource with protection: {}".format(dc.dataframe["pairs"].mean()))
+    #print("Average probability of success with protection: {}".format(dc.dataframe["probability"].mean()))
     create_plot()

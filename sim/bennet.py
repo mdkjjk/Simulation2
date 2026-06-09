@@ -348,7 +348,7 @@ def create_plot():
     save_dir = "./plots_test"
     count = len([f for f in os.listdir(save_dir)
                  if f.startswith("Bennet result")])
-    datas.to_csv(f"{save_dir}/Bennet result_{count + 1}.csv",)
+    datas.to_csv(f"{save_dir}/Bennet result_{count + 1}.csv")
 
 if __name__ == "__main__":
     #network = network_setup()
