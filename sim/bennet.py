@@ -6,6 +6,8 @@ import matplotlib, os
 from matplotlib import pyplot as plt
 import noise
 from noise import AmplitudeNoiseModel, PhaseNoiseModel
+import teleportation
+from teleportation import InitStateProgram, BellMeasurement, Correction
 
 from netsquid.qubits import operators as ops
 from netsquid.qubits import qubitapi as qapi
@@ -88,7 +90,7 @@ class Bennet(NodeProtocol):
             # 測定結果を受信した場合
             if expr.first_term.value:
                 classical_message = self.port.rx_input(header=self.header)
-                #print(f"{self.name}:result received")
+                print(f"{self.name}:result received")
                 if classical_message:
                     self.remote_qcount, self.remote_meas_result = classical_message.items
             # エンタングルメントを受信した場合
@@ -97,7 +99,7 @@ class Bennet(NodeProtocol):
                 # エンタングルメントが保存されたメモリポジションを取得
                 ready_signal = source_protocol.get_signal_by_event(
                     event=expr.second_term.triggered_events[0], receiver=self)
-                #print(f"{self.name}: Entanglement received at {ready_signal.result} / time: {sim_time()}")
+                print(f"{self.name}: Entanglement received at {ready_signal.result} / time: {sim_time()}")
                 yield from self._handle_new_qubit(ready_signal.result)
             self._check_success()
     
@@ -232,6 +234,9 @@ class BennetExample(LocalProtocol):
         # 精製処理プロトコル
         self.add_subprotocol(Bennet(node_a, node_a.ports["cout_bob"], role="A", name="bennet_A"))
         self.add_subprotocol(Bennet(node_b, node_b.ports["cin_alice"], role="B", name="bennet_B"))
+        # テレポーテーションプロトコル
+        self.add_subprotocol(BellMeasurement(node=node_a, port=node_a.ports["cout_bob"], name="teleport_A"))
+        self.add_subprotocol(Correction(node=node_b, name="teleport_B"))
         # エンタングルメント生成プロトコルの開始条件
         self.subprotocols["entangle_A"].start_expression = (
             self.subprotocols["entangle_A"].await_signal(self.subprotocols["bennet_A"], Signals.FAIL) |
@@ -243,6 +248,10 @@ class BennetExample(LocalProtocol):
         self.subprotocols["bennet_B"].start_expression = (
             self.subprotocols["bennet_B"].await_signal(self.subprotocols["entangle_B"],
                                                        Signals.SUCCESS))
+        self.subprotocols["teleport_A"].start_expression = self.subprotocols["teleport_A"].await_signal(
+                                                            self.subprotocols["bennet_A"], Signals.SUCCESS)
+        self.subprotocols["teleport_B"].start_expression = self.subprotocols["teleport_B"].await_signal(
+                                                            self.subprotocols["bennet_B"], Signals.SUCCESS)
     
     def run(self):
         self.start_subprotocols()
@@ -251,18 +260,26 @@ class BennetExample(LocalProtocol):
             start_time = sim_time()
             self.subprotocols["entangle_A"].entangled_pairs = 0
             self.send_signal(Signals.WAITING)
-            yield (self.await_signal(self.subprotocols["bennet_A"], Signals.SUCCESS) &
-                    self.await_signal(self.subprotocols["bennet_B"], Signals.SUCCESS))
+            yield (self.await_signal(self.subprotocols["teleport_A"], Signals.SUCCESS) &
+                   self.await_signal(self.subprotocols["teleport_B"], Signals.SUCCESS)) # 各ノードでのテレポーテーション処理が完了するまで待機
             signal_A = self.subprotocols["bennet_A"].get_signal_result(Signals.SUCCESS, self)
             signal_B = self.subprotocols["bennet_B"].get_signal_result(Signals.SUCCESS, self)                                                     
-            result = {
+            result_en = {
                 "pos_A": signal_A[0],
                 "pos_B": signal_B[0],
-                "time": sim_time() - start_time,
                 "pairs": self.subprotocols["entangle_A"].entangled_pairs,
                 "runs": signal_A[1]
             }
-            self.send_signal(Signals.SUCCESS, result)
+            print(result_en)
+            result_A = self.subprotocols["teleport_A"].get_signal_result(Signals.SUCCESS, self)
+            result_B = self.subprotocols["teleport_B"].get_signal_result(Signals.SUCCESS, self)
+            result_tel = {
+                "pos_A0": result_A["pos_A0"],
+                "pos_A1": result_A["pos_A1"],
+                "pos_B": result_B,
+                "time": sim_time() - start_time
+            }
+            self.send_signal(Signals.SUCCESS, [result_en, result_tel])
 
 def sim_setup(node_a, node_b, num_runs):
     be_example = BennetExample(node_a, node_b, num_runs=num_runs)
@@ -270,8 +287,8 @@ def sim_setup(node_a, node_b, num_runs):
     def record_run(evexpr):
         # Callback that collects data each run
         protocol = evexpr.triggered_events[-1].source
-        result = protocol.get_signal_result(Signals.SUCCESS)
-        #print(result)
+        result_en, result_tel = protocol.get_signal_result(Signals.SUCCESS)
+        print(result_en)
         # Record fidelity
         q_A, = node_a.qmemory.pop(positions=[result["pos_A"]])
         q_B, = node_b.qmemory.pop(positions=[result["pos_B"]])
@@ -351,11 +368,11 @@ def create_plot():
     datas.to_csv(f"{save_dir}/Bennet result_{count + 1}.csv")
 
 if __name__ == "__main__":
-    #network = network_setup()
-    #be_example, dc = sim_setup(network.get_node("node_A"), network.get_node("node_B"), num_runs=10)
-    #be_example.start()
-    #ns.sim_run()
-    #print("Average fidelity of generated entanglement with bennet: {}".format(dc.dataframe["F2"].mean()))
-    #print("Average resource with bennet: {}".format(dc.dataframe["pairs"].mean()))
-    #print("Average probability of success with bennet: {}".format(dc.dataframe["probability"].mean()))
-    create_plot()
+    network = network_setup()
+    be_example, dc = sim_setup(network.get_node("node_A"), network.get_node("node_B"), num_runs=1)
+    be_example.start()
+    ns.sim_run()
+    print("Average fidelity of generated entanglement with bennet: {}".format(dc.dataframe["F2"].mean()))
+    print("Average resource with bennet: {}".format(dc.dataframe["pairs"].mean()))
+    print("Average probability of success with bennet: {}".format(dc.dataframe["probability"].mean()))
+    #create_plot()
