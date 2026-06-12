@@ -90,7 +90,7 @@ class Bennet(NodeProtocol):
             # 測定結果を受信した場合
             if expr.first_term.value:
                 classical_message = self.port.rx_input(header=self.header)
-                print(f"{self.name}:result received")
+                #print(f"{self.name}: result {classical_message.items} received")
                 if classical_message:
                     self.remote_qcount, self.remote_meas_result = classical_message.items
             # エンタングルメントを受信した場合
@@ -99,7 +99,7 @@ class Bennet(NodeProtocol):
                 # エンタングルメントが保存されたメモリポジションを取得
                 ready_signal = source_protocol.get_signal_by_event(
                     event=expr.second_term.triggered_events[0], receiver=self)
-                print(f"{self.name}: Entanglement received at {ready_signal.result} / time: {sim_time()}")
+                #print(f"{self.name}: Entanglement received at {ready_signal.result} / time: {sim_time()}")
                 yield from self._handle_new_qubit(ready_signal.result)
             self._check_success()
     
@@ -184,7 +184,7 @@ class Bennet(NodeProtocol):
             return False
         return True
 
-def network_setup(source_delay=1e5, source_fidelity_sq=0.9, fidelity=0.7,depolar_rate=100, node_distance=1000):
+def network_setup(source_delay=1e5, source_fidelity_sq=0.9, fidelity=0.7, depolar_rate=100, node_distance=300):
     network = Network("bennet_network")
 
     # ノード設定
@@ -265,12 +265,9 @@ class BennetExample(LocalProtocol):
             signal_A = self.subprotocols["bennet_A"].get_signal_result(Signals.SUCCESS, self)
             signal_B = self.subprotocols["bennet_B"].get_signal_result(Signals.SUCCESS, self)                                                     
             result_en = {
-                "pos_A": signal_A[0],
-                "pos_B": signal_B[0],
                 "pairs": self.subprotocols["entangle_A"].entangled_pairs,
                 "runs": signal_A[1]
             }
-            print(result_en)
             result_A = self.subprotocols["teleport_A"].get_signal_result(Signals.SUCCESS, self)
             result_B = self.subprotocols["teleport_B"].get_signal_result(Signals.SUCCESS, self)
             result_tel = {
@@ -288,14 +285,14 @@ def sim_setup(node_a, node_b, num_runs):
         # Callback that collects data each run
         protocol = evexpr.triggered_events[-1].source
         result_en, result_tel = protocol.get_signal_result(Signals.SUCCESS)
-        print(result_en)
         # Record fidelity
-        q_A, = node_a.qmemory.pop(positions=[result["pos_A"]])
-        q_B, = node_b.qmemory.pop(positions=[result["pos_B"]])
+        node_a.qmemory.pop(positions=[result_tel["pos_A0"]]) # popにより、使用しているメモリを解放
+        node_a.qmemory.pop(positions=[result_tel["pos_A1"]])
+        q_B, = node_b.qmemory.pop(positions=[result_tel["pos_B"]])
         #print(qapi.reduced_dm([q_A, q_B]))
-        f2 = qapi.fidelity([q_A, q_B], ks.b11, squared=True)
-        prob = 1 / result["runs"]
-        return {"F2": f2, "pairs": result["pairs"], "probability": prob, "time": result["time"]}
+        f2 = qapi.fidelity(q_B, ks.y0, squared=True)
+        prob = 1 / result_en["runs"]
+        return {"F2": f2, "pairs": result_en["pairs"], "probability": prob, "time": result_tel["time"]}
 
     dc = DataCollector(record_run, include_time_stamp=False,
                        include_entity_name=False)
@@ -369,7 +366,7 @@ def create_plot():
 
 if __name__ == "__main__":
     network = network_setup()
-    be_example, dc = sim_setup(network.get_node("node_A"), network.get_node("node_B"), num_runs=1)
+    be_example, dc = sim_setup(network.get_node("node_A"), network.get_node("node_B"), num_runs=10)
     be_example.start()
     ns.sim_run()
     print("Average fidelity of generated entanglement with bennet: {}".format(dc.dataframe["F2"].mean()))
