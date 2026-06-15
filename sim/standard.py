@@ -1,10 +1,11 @@
 # シミュレーション：精製処理を適用しない場合の伝送忠実度の測定
-
 import netsquid as ns
 import pydynaa as pd
 import pandas
 import matplotlib, os
 from matplotlib import pyplot as plt
+import noise
+from noise import AmplitudeNoiseModel, PhaseNoiseModel
 
 # 必要となるパッケージのインポート
 import netsquid.components.instructions as instr
@@ -20,6 +21,7 @@ from netsquid.util.datacollector import DataCollector
 from netsquid.qubits import qubitapi as qapi
 from netsquid.qubits import ketstates as ks
 from netsquid.qubits.state_sampler import StateSampler
+from netsquid.qubits.qformalism import QFormalism
 from netsquid.protocols.nodeprotocols import NodeProtocol, LocalProtocol
 from netsquid.protocols.protocol import Signals
 from netsquid.nodes.network import Network
@@ -27,6 +29,7 @@ from netsquid.nodes.connections import DirectConnection
 from netsquid.examples.entanglenodes import EntangleNodes
 from pydynaa import EventExpression
 
+ns.set_qstate_formalism(QFormalism.DM)
 
 class InitStateProgram(QuantumProgram): # 伝送する量子ビットを生成するプログラム
     default_num_qubits = 1

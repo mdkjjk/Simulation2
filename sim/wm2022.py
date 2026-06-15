@@ -7,12 +7,14 @@ import math
 from matplotlib import pyplot as plt
 import noise
 from noise import AmplitudeNoiseModel, PhaseNoiseModel
+import teleportation
+from teleportation import InitStateProgram, BellMeasurement, Correction
 
 from netsquid.qubits import operators as ops
 from netsquid.qubits import qubitapi as qapi
 from netsquid.qubits import ketstates as ks
 from netsquid.qubits.qubitapi import fidelity, discard
-from netsquid.qubits.ketstates import s00, b00
+from netsquid.qubits.ketstates import s00, b00, y0
 from netsquid.qubits.state_sampler import StateSampler
 from netsquid.qubits.qformalism import QFormalism
 from netsquid.qubits.dmtools import DenseDMRepr
@@ -135,13 +137,13 @@ class Protect(NodeProtocol):   # Alice側のプロトコル
                 classical_message = self.port.rx_input(header=self.header)
                 if classical_message:
                     self.remote_qcount, self.remote_meas_result = classical_message.items
-                    #print(f"{self.name}: Bob's result received {classical_message}")
+                    print(f"{self.name}: Bob's result received {classical_message}")
                     self._handle_cchannel_rx()
             elif expr.second_term.value:
                 source_protocol = expr.second_term.atomic_source
                 ready_signal = source_protocol.get_signal_by_event(
                         event=expr.second_term.triggered_events[0], receiver=self) # エンタングルメントが保存されたメモリポジションを取得
-                #print(f"{self.name}: Entanglement received at {ready_signal.result} / time: {sim_time()}")      
+                print(f"{self.name}: Entanglement received at {ready_signal.result} / time: {sim_time()}")      
                 self._qmem_positions[0] = ready_signal.result["mem_pos0"]
                 self._qmem_positions[1] = ready_signal.result["mem_pos1"]
                 yield from self._handle_qubit_rx()
@@ -192,7 +194,7 @@ class Protect(NodeProtocol):   # Alice側のプロトコル
             self.remote_meas_result = None
         else:
             self.send_signal(Signals.SUCCESS, [self._qmem_positions[0], self.num_runs])
-            #print(f"{self.name}: SUCCESS")
+            print(f"{self.name}: SUCCESS")
             self.num_runs = 0
 
     def _handle_fail(self):
@@ -239,12 +241,12 @@ class RWMeasure(NodeProtocol):   # Bob側のプロトコル
                 classical_message = self.port_c.rx_input(header=self.header)
                 if classical_message:
                     self.remote_qcount, self.remote_meas_result = classical_message.items
-                    #print(f"{self.name}: Alice's result received {classical_message}")
+                    print(f"{self.name}: Alice's result received {classical_message}")
             elif expr.second_term.value:
                 #print(f"{self.name}: {self.node.qmemory.used_positions}")
                 self._qmem_pos = self.node.qmemory.used_positions
-                #print(f"{self.name}: Entanglement arrived at {self._qmem_pos}")
-                #print(f"{self.name}: Remote result = {self.remote_meas_result}")
+                print(f"{self.name}: Entanglement arrived at {self._qmem_pos}")
+                print(f"{self.name}: Remote result = {self.remote_meas_result}")
                 if self.remote_meas_result is not None:
                     yield from self._handle_qubit_rx()
     
@@ -285,7 +287,7 @@ class RWMeasure(NodeProtocol):   # Bob側のプロトコル
     def _check_success(self):
         if (self.local_qcount > 0 and self.local_qcount == self.remote_qcount and
                 self.local_meas_result == 0):
-            #print(f"{self.name}: SUCCESS")
+            print(f"{self.name}: SUCCESS")
             self.send_signal(Signals.SUCCESS, self._qmem_pos[0])
             self.remote_meas_result = None
         elif self.local_meas_result == 0 and self.local_qcount > self.remote_qcount:
@@ -305,7 +307,7 @@ class RWMeasure(NodeProtocol):   # Bob側のプロトコル
 
         
 
-def network_setup(source_delay=1e5, source_fidelity_sq=0.9, damp_rate=150, node_distance=2000):
+def network_setup(source_delay=1e5, source_fidelity_sq=0.9, damp_rate=200, node_distance=300):
     network = Network("wmeasure_network")
 
     # ノード設定
@@ -354,18 +356,26 @@ class ProtectExample(LocalProtocol):
         self.add_subprotocol(Protect(node_a, node_a.ports["cout_bob"], omega=np.pi/3, name="protect_A"))
         self.add_subprotocol(RWMeasure(node_b, node_b.ports["cin_alice"],
                              node_b.ports["qin_alice"], theta=0.2, name="rwmeasure_B"))
+        # テレポーテーションプロトコル
+        self.add_subprotocol(BellMeasurement(node=node_a, port=node_a.ports["cout_bob"], name="teleport_A"))
+        self.add_subprotocol(Correction(node=node_b, name="teleport_B"))
         # エンタングルメント生成プロトコルの開始条件
         self.subprotocols["entangle_A"].start_expression = (
                              self.subprotocols["entangle_A"].await_signal(self, Signals.WAITING) |
                              self.subprotocols["entangle_A"].await_signal(self.subprotocols["protect_A"], Signals.FAIL))
-        # 精製処理プロトコルの開始条件                        
+        # 保護処理プロトコルの開始条件                        
         self.subprotocols["protect_A"].start_expression = (
             self.subprotocols["protect_A"].await_signal(self.subprotocols["entangle_A"],
                                                        Signals.SUCCESS))
         self.subprotocols["rwmeasure_B"].start_expression = (
             self.subprotocols["rwmeasure_B"].await_signal(self, Signals.WAITING) |
             self.subprotocols["rwmeasure_B"].await_signal(self.subprotocols["protect_A"], Signals.FAIL))
-                                                       
+        # テレポーテーションプロトコルの開始条件
+        self.subprotocols["teleport_A"].start_expression = self.subprotocols["teleport_A"].await_signal(
+                                                            self.subprotocols["protect_A"], Signals.SUCCESS)
+        self.subprotocols["teleport_B"].start_expression = self.subprotocols["teleport_B"].await_signal(
+                                                            self.subprotocols["rwmeasure_B"], Signals.SUCCESS)
+
     def run(self):
         self.start_subprotocols()
         for i in range(self.num_runs):
@@ -373,18 +383,23 @@ class ProtectExample(LocalProtocol):
             start_time = sim_time()
             self.subprotocols["entangle_A"].entangled_pairs = 0
             self.send_signal(Signals.WAITING)
-            yield (self.await_signal(self.subprotocols["protect_A"], Signals.SUCCESS) &
-                    self.await_signal(self.subprotocols["rwmeasure_B"], Signals.SUCCESS))
+            yield (self.await_signal(self.subprotocols["teleport_A"], Signals.SUCCESS) &
+                    self.await_signal(self.subprotocols["teleport_B"], Signals.SUCCESS))
             signal_A = self.subprotocols["protect_A"].get_signal_result(Signals.SUCCESS, self)
             signal_B = self.subprotocols["rwmeasure_B"].get_signal_result(Signals.SUCCESS, self)
-            result = {
-                "pos_A": signal_A[0],
-                "pos_B": signal_B,
-                "time": sim_time() - start_time,
+            result_en = {
                 "pairs": self.subprotocols["entangle_A"].entangled_pairs,
                 "runs": signal_A[1]
             }
-            self.send_signal(Signals.SUCCESS, result)
+            result_A = self.subprotocols["teleport_A"].get_signal_result(Signals.SUCCESS, self)
+            result_B = self.subprotocols["teleport_B"].get_signal_result(Signals.SUCCESS, self)
+            result_tel = {
+                "pos_A0": result_A["pos_A0"],
+                "pos_A1": result_A["pos_A1"],
+                "pos_B": result_B,
+                "time": sim_time() - start_time
+            }
+            self.send_signal(Signals.SUCCESS, [result_en, result_tel])
 
 def sim_setup(node_a, node_b, num_runs, omega, theta):
     pro_example = ProtectExample(node_a, node_b, num_runs, omega, theta)
@@ -392,15 +407,16 @@ def sim_setup(node_a, node_b, num_runs, omega, theta):
     def record_run(evexpr):
         # Callback that collects data each run
         protocol = evexpr.triggered_events[-1].source
-        result = protocol.get_signal_result(Signals.SUCCESS)
-        #print(result)
+        result_en, result_tel = protocol.get_signal_result(Signals.SUCCESS)
+        print(result_tel)
         # Record fidelity
-        q_A, = node_a.qmemory.pop(positions=[result["pos_A"]])
-        q_B, = node_b.qmemory.pop(positions=[result["pos_B"]])
+        node_a.qmemory.pop(positions=[result_tel["pos_A0"]]) # popにより、使用しているメモリを解放
+        node_a.qmemory.pop(positions=[result_tel["pos_A1"]])
+        q_B, = node_b.qmemory.pop(positions=[result_tel["pos_B"]])
         #print(qapi.reduced_dm([q_A, q_B]))
-        f2 = qapi.fidelity([q_A, q_B], ks.b00, squared=True)
-        prob = 1 / result["runs"]
-        return {"F2": f2, "pairs": result["pairs"], "probability": prob, "time": result["time"]}
+        f2 = qapi.fidelity(q_B, ks.y0, squared=True)
+        prob = 1 / result_en["runs"]
+        return {"F2": f2, "pairs": result_en["pairs"], "probability": prob, "time": result_tel["time"]}
 
     dc = DataCollector(record_run, include_time_stamp=False,
                        include_entity_name=False)
@@ -486,11 +502,11 @@ def create_plot():
     datas.to_csv(f"{save_dir}/Protect result_{count + 1}.csv")
         
 if __name__ == "__main__":
-    #network = network_setup()
-    #pro_example, dc = sim_setup(network.get_node("node_A"), network.get_node("node_B"), 5, np.pi/3, 0.2)
-    #pro_example.start()
-    #ns.sim_run()
-    #print("Average fidelity of generated entanglement with protection: {}".format(dc.dataframe["F2"].mean()))
-    #print("Average resource with protection: {}".format(dc.dataframe["pairs"].mean()))
-    #print("Average probability of success with protection: {}".format(dc.dataframe["probability"].mean()))
-    create_plot()
+    network = network_setup()
+    pro_example, dc = sim_setup(network.get_node("node_A"), network.get_node("node_B"), 1, np.pi/3, 0.2)
+    pro_example.start()
+    ns.sim_run()
+    print("Average fidelity of generated entanglement with protection: {}".format(dc.dataframe["F2"].mean()))
+    print("Average resource with protection: {}".format(dc.dataframe["pairs"].mean()))
+    print("Average probability of success with protection: {}".format(dc.dataframe["probability"].mean()))
+    #create_plot()
