@@ -137,13 +137,13 @@ class Protect(NodeProtocol):   # Alice側のプロトコル
                 classical_message = self.port.rx_input(header=self.header)
                 if classical_message:
                     self.remote_qcount, self.remote_meas_result = classical_message.items
-                    print(f"{self.name}: Bob's result received {classical_message}")
+                    #print(f"{self.name}: Bob's result received {classical_message}")
                     self._handle_cchannel_rx()
             elif expr.second_term.value:
                 source_protocol = expr.second_term.atomic_source
                 ready_signal = source_protocol.get_signal_by_event(
                         event=expr.second_term.triggered_events[0], receiver=self) # エンタングルメントが保存されたメモリポジションを取得
-                print(f"{self.name}: Entanglement received at {ready_signal.result} / time: {sim_time()}")      
+                #print(f"{self.name}: Entanglement received at {ready_signal.result} / time: {sim_time()}")      
                 self._qmem_positions[0] = ready_signal.result["mem_pos0"]
                 self._qmem_positions[1] = ready_signal.result["mem_pos1"]
                 yield from self._handle_qubit_rx()
@@ -194,7 +194,7 @@ class Protect(NodeProtocol):   # Alice側のプロトコル
             self.remote_meas_result = None
         else:
             self.send_signal(Signals.SUCCESS, [self._qmem_positions[0], self.num_runs])
-            print(f"{self.name}: SUCCESS")
+            #print(f"{self.name}: SUCCESS")
             self.num_runs = 0
 
     def _handle_fail(self):
@@ -241,12 +241,12 @@ class RWMeasure(NodeProtocol):   # Bob側のプロトコル
                 classical_message = self.port_c.rx_input(header=self.header)
                 if classical_message:
                     self.remote_qcount, self.remote_meas_result = classical_message.items
-                    print(f"{self.name}: Alice's result received {classical_message}")
+                    #print(f"{self.name}: Alice's result received {classical_message}")
             elif expr.second_term.value:
                 #print(f"{self.name}: {self.node.qmemory.used_positions}")
                 self._qmem_pos = self.node.qmemory.used_positions
-                print(f"{self.name}: Entanglement arrived at {self._qmem_pos}")
-                print(f"{self.name}: Remote result = {self.remote_meas_result}")
+                #print(f"{self.name}: Entanglement arrived at {self._qmem_pos}")
+                #print(f"{self.name}: Remote result = {self.remote_meas_result}")
                 if self.remote_meas_result is not None:
                     yield from self._handle_qubit_rx()
     
@@ -287,7 +287,7 @@ class RWMeasure(NodeProtocol):   # Bob側のプロトコル
     def _check_success(self):
         if (self.local_qcount > 0 and self.local_qcount == self.remote_qcount and
                 self.local_meas_result == 0):
-            print(f"{self.name}: SUCCESS")
+            #print(f"{self.name}: SUCCESS")
             self.send_signal(Signals.SUCCESS, self._qmem_pos[0])
             self.remote_meas_result = None
         elif self.local_meas_result == 0 and self.local_qcount > self.remote_qcount:
@@ -386,7 +386,6 @@ class ProtectExample(LocalProtocol):
             yield (self.await_signal(self.subprotocols["teleport_A"], Signals.SUCCESS) &
                     self.await_signal(self.subprotocols["teleport_B"], Signals.SUCCESS))
             signal_A = self.subprotocols["protect_A"].get_signal_result(Signals.SUCCESS, self)
-            signal_B = self.subprotocols["rwmeasure_B"].get_signal_result(Signals.SUCCESS, self)
             result_en = {
                 "pairs": self.subprotocols["entangle_A"].entangled_pairs,
                 "runs": signal_A[1]
@@ -408,10 +407,10 @@ def sim_setup(node_a, node_b, num_runs, omega, theta):
         # Callback that collects data each run
         protocol = evexpr.triggered_events[-1].source
         result_en, result_tel = protocol.get_signal_result(Signals.SUCCESS)
-        print(result_tel)
+        #print(result_tel)
         # Record fidelity
-        node_a.qmemory.pop(positions=[result_tel["pos_A0"]]) # popにより、使用しているメモリを解放
-        node_a.qmemory.pop(positions=[result_tel["pos_A1"]])
+        node_a.qmemory.discard(positions=[result_tel["pos_A0"]]) # popにより、使用しているメモリを解放
+        node_a.qmemory.discard(positions=[result_tel["pos_A1"]])
         q_B, = node_b.qmemory.pop(positions=[result_tel["pos_B"]])
         #print(qapi.reduced_dm([q_A, q_B]))
         f2 = qapi.fidelity(q_B, ks.y0, squared=True)
@@ -432,7 +431,7 @@ def run_experiment(var_o, var_t):
             network = network_setup()
             node_a = network.get_node("node_A")
             node_b = network.get_node("node_B")
-            pro_example, dc = sim_setup(node_a, node_b, 3, omega, theta)
+            pro_example, dc = sim_setup(node_a, node_b, 10, omega, theta)
             pro_example.start()
             ns.sim_run()
             df = dc.dataframe
@@ -502,11 +501,11 @@ def create_plot():
     datas.to_csv(f"{save_dir}/Protect result_{count + 1}.csv")
         
 if __name__ == "__main__":
-    network = network_setup()
-    pro_example, dc = sim_setup(network.get_node("node_A"), network.get_node("node_B"), 1, np.pi/3, 0.2)
-    pro_example.start()
-    ns.sim_run()
-    print("Average fidelity of generated entanglement with protection: {}".format(dc.dataframe["F2"].mean()))
-    print("Average resource with protection: {}".format(dc.dataframe["pairs"].mean()))
-    print("Average probability of success with protection: {}".format(dc.dataframe["probability"].mean()))
-    #create_plot()
+    #network = network_setup()
+    #pro_example, dc = sim_setup(network.get_node("node_A"), network.get_node("node_B"), 1, np.pi/3, 0.2)
+    #pro_example.start()
+    #ns.sim_run()
+    #print("Average fidelity of generated entanglement with protection: {}".format(dc.dataframe["F2"].mean()))
+    #print("Average resource with protection: {}".format(dc.dataframe["pairs"].mean()))
+    #print("Average probability of success with protection: {}".format(dc.dataframe["probability"].mean()))
+    create_plot()

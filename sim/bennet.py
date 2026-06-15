@@ -263,7 +263,6 @@ class BennetExample(LocalProtocol):
             yield (self.await_signal(self.subprotocols["teleport_A"], Signals.SUCCESS) &
                    self.await_signal(self.subprotocols["teleport_B"], Signals.SUCCESS)) # 各ノードでのテレポーテーション処理が完了するまで待機
             signal_A = self.subprotocols["bennet_A"].get_signal_result(Signals.SUCCESS, self)
-            signal_B = self.subprotocols["bennet_B"].get_signal_result(Signals.SUCCESS, self)                                                     
             result_en = {
                 "pairs": self.subprotocols["entangle_A"].entangled_pairs,
                 "runs": signal_A[1]

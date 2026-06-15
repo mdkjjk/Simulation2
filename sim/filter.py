@@ -6,6 +6,8 @@ import matplotlib, os
 from matplotlib import pyplot as plt
 import noise
 from noise import AmplitudeNoiseModel, PhaseNoiseModel
+import teleportation
+from teleportation import InitStateProgram, BellMeasurement, Correction
 
 import netsquid.components.instructions as instr
 from netsquid.components import ClassicalChannel, QuantumChannel
@@ -182,97 +184,6 @@ class Filter(NodeProtocol):
         if self.node.qmemory.num_positions < 1:
             return False
         return True
-
-
-class InitStateProgram(QuantumProgram):
-    default_num_qubits = 1
-
-    def program(self):
-        q1, = self.get_qubit_indices(1)
-        self.apply(instr.INSTR_INIT, q1)
-        self.apply(instr.INSTR_H, q1)
-        self.apply(instr.INSTR_S, q1)
-        yield self.run()
-
-
-class BellMeasurement(NodeProtocol):
-    def __init__(self, node, port, name=None):
-        super().__init__(node, name)
-        self.port = port
-        self._qmem_pos0 = None
-        self._qmem_pos1 = None
-
-    def start(self):
-        super().start()
-        if self.start_expression is not None and not isinstance(self.start_expression, EventExpression):
-            raise TypeError("Start expression should be a {}, not a {}".format(EventExpression, type(self.start_expression)))
-
-    def run(self):
-        qubit_initialised = False
-        entanglement_ready = False
-        qubit_init_program = InitStateProgram()
-        while True:
-            #print(f"{self.name}: Start")
-            expr_port = self.start_expression
-            yield expr_port
-            entanglement_ready = True
-            source_protocol = expr_port.atomic_source
-            ready_signal = source_protocol.get_signal_by_event(event=expr_port.triggered_events[0], receiver=self)
-            self._qmem_pos1 = ready_signal.result[0]
-            #print(f"{self.name}: Entanglement received at {self._qmem_pos1} / time: {sim_time()}")
-            self._qmem_pos0 = self.node.qmemory.unused_positions[0]
-            self.node.qmemory.execute_program(qubit_init_program, qubit_mapping=[self._qmem_pos0])
-            expr_signal = self.await_program(self.node.qmemory)
-            yield expr_signal
-            qubit_initialised = True
-            #print(f"{self.name}: Initqubit received at {self._qmem_pos0} / time: {sim_time()}")
-            if qubit_initialised and entanglement_ready:
-                self.node.qmemory.operate(ns.CNOT, [self._qmem_pos0, self._qmem_pos1])
-                self.node.qmemory.operate(ns.H, self._qmem_pos0)
-                m, _ = self.node.qmemory.measure([self._qmem_pos0, self._qmem_pos1])
-                # Send measurement results to Bob:
-                self.port.tx_output(m)
-                result = {"pos_A0": self._qmem_pos0,
-                          "pos_A1": self._qmem_pos1,}
-                self.send_signal(Signals.SUCCESS, result)
-                #print(f"{self.name}: Finish / time: {sim_time()}")
-                qubit_initialised = False
-                entanglement_ready = False
-
-
-class Correction(NodeProtocol):
-    def __init__(self, node, start_expression=None, name=None):
-        super().__init__(node, name)
-        self.start_expression = start_expression
-        self._qmem_pos = None
-
-    def run(self):
-        port_alice = self.node.ports["cin_alice"]
-        entanglement_ready = False
-        meas_results = None
-        while True:
-            expr_signal = self.start_expression
-            expr = yield (self.await_port_input(port_alice) | expr_signal)
-            if expr.first_term.value:
-                meas_results = port_alice.rx_input().items
-                #print(f"{self.name}: Result: {meas_results} / time: {sim_time()}")
-            else:
-                entanglement_ready = True
-                source_protocol = expr.second_term.atomic_source
-                ready_signal = source_protocol.get_signal_by_event(event=expr.second_term.triggered_events[-1], receiver=self)
-                self._qmem_pos = ready_signal.result[0]
-                #print(f"{self.name}: Entanglement received at {self._qmem_pos} / time: {sim_time()}")
-            if meas_results is not None and entanglement_ready:
-                # Do corrections (blocking)
-                if meas_results[0] == 1:
-                    self.node.qmemory.execute_instruction(instr.INSTR_Z, [self._qmem_pos])
-                if meas_results[1] == 1:
-                    self.node.qmemory.execute_instruction(instr.INSTR_X, [self._qmem_pos])
-                self.send_signal(Signals.SUCCESS, self._qmem_pos)
-                #print(f"{self.name}: Teleport success / time: {sim_time()}")
-                entanglement_ready = False
-                meas_results = None
-
 
 class FilteringExample(LocalProtocol):
     r"""Protocol for a complete filtering experiment.
