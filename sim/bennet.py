@@ -120,15 +120,14 @@ class Bennet(NodeProtocol):
 
     def _handle_new_qubit(self, memory_position):
         assert not self.node.qmemory.mem_positions[memory_position].is_empty
-        # 2つ目のエンタングルメントが到着した場合
-        if self._waiting_on_second_qubit:
+        
+        if self._waiting_on_second_qubit:   # 2つ目のエンタングルメントが到着した場合
             assert not self.node.qmemory.mem_positions[self._qmem_positions[0]].is_empty
             assert memory_position != self._qmem_positions[0]
             self._qmem_positions[1] = memory_position
             self._waiting_on_second_qubit = False
-            yield from self._node_do_bennet()
-        # 1つ目のエンタングルメントが到着した場合
-        else:
+            yield from self._node_do_bennet()   # 精製処理を行う
+        else:   # 1つ目のエンタングルメントが到着した場合
             self.num_runs += 1
             #print(f"{self.name}: Sim {self.num_runs}")
             # Pop previous qubit if present:
@@ -146,15 +145,15 @@ class Bennet(NodeProtocol):
         pos1, pos2 = self._qmem_positions
         if self.node.qmemory.busy:
             yield self.await_program(self.node.qmemory)
-        if self.role.upper() == "A":
+        if self.role.upper() == "A": # Aliceの場合、回転操作を行う
             yield self.node.qmemory.execute_program(self._rotprog, [pos1, pos2])
-        yield self.node.qmemory.execute_program(self._measprog, [pos1, pos2])
-        if self.role.upper() == "A":
+        yield self.node.qmemory.execute_program(self._measprog, [pos1, pos2]) # 測定
+        if self.role.upper() == "A": # Aliceの場合、回転操作を行う
             yield self.node.qmemory.execute_program(self._reprog, [pos2])
         self.local_meas_result = self._measprog.output["M"][0]
         self._qmem_positions[0] = None
         self.port.tx_output(Message([self.local_qcount, self.local_meas_result],
-                                    header=self.header))
+                                    header=self.header))   # 測定結果をBobに送信
         
     def _check_success(self):   # 測定結果の比較
         if (self.local_qcount == self.remote_qcount and
@@ -184,7 +183,7 @@ class Bennet(NodeProtocol):
             return False
         return True
 
-def network_setup(source_delay=1e5, source_fidelity_sq=0.9, fidelity=0.7, depolar_rate=100, node_distance=300):
+def network_setup(source_delay=1e5, source_fidelity_sq=0.9, depolar_rate=100, node_distance=300):
     network = Network("bennet_network")
 
     # ノード設定
@@ -205,8 +204,10 @@ def network_setup(source_delay=1e5, source_fidelity_sq=0.9, fidelity=0.7, depola
         ClassicalChannel("CChannel_B->A", length=node_distance, models={"delay_model": FibreDelayModel(c=200e3)}))
     network.add_connection(node_a, node_b, connection=conn_cchannel,
                            port_name_node1="cout_bob", port_name_node2="cin_alice")
-    #p = 4/3 * (1 - fidelity)
     # DepolarNoiseModelのtime_independentは、True->理論値を確認できる　False->時間依存なので現実に近くなる
+    # "quantum_noise_model": DepolarNoiseModel(depolar_rate=depolar_rate, time_independent=False)
+    # "quantum_noise_model": AmplitudeNoiseModel(gamma=damp_rate, time_independent=False)
+    # "quantum_noise_model": PhaseNoiseModel(gamma=damp_rate, time_independent=False)
     qchannel = QuantumChannel("QChannel_A->B", length=node_distance,
                               models={"quantum_noise_model": DepolarNoiseModel(depolar_rate=depolar_rate, time_independent=False),
                                       "delay_model": FibreDelayModel(c=200e3)})
@@ -260,8 +261,9 @@ class BennetExample(LocalProtocol):
             start_time = sim_time()
             self.subprotocols["entangle_A"].entangled_pairs = 0
             self.send_signal(Signals.WAITING)
+            # 各ノードでのテレポーテーション処理が完了するまで待機
             yield (self.await_signal(self.subprotocols["teleport_A"], Signals.SUCCESS) &
-                   self.await_signal(self.subprotocols["teleport_B"], Signals.SUCCESS)) # 各ノードでのテレポーテーション処理が完了するまで待機
+                   self.await_signal(self.subprotocols["teleport_B"], Signals.SUCCESS)) 
             signal_A = self.subprotocols["bennet_A"].get_signal_result(Signals.SUCCESS, self)
             result_en = {
                 "pairs": self.subprotocols["entangle_A"].entangled_pairs,
@@ -285,13 +287,13 @@ def sim_setup(node_a, node_b, num_runs):
         protocol = evexpr.triggered_events[-1].source
         result_en, result_tel = protocol.get_signal_result(Signals.SUCCESS)
         # Record fidelity
-        node_a.qmemory.pop(positions=[result_tel["pos_A0"]]) # popにより、使用しているメモリを解放
-        node_a.qmemory.pop(positions=[result_tel["pos_A1"]])
+        node_a.qmemory.discard(positions=[result_tel["pos_A0"]]) # 使用しているメモリを解放
+        node_a.qmemory.discard(positions=[result_tel["pos_A1"]])
         q_B, = node_b.qmemory.pop(positions=[result_tel["pos_B"]])
         #print(qapi.reduced_dm([q_A, q_B]))
-        f2 = qapi.fidelity(q_B, ks.y0, squared=True)
+        f2 = qapi.fidelity(q_B, ks.y0, squared=True)   # 忠実度を求める
         prob = 1 / result_en["runs"]
-        return {"F2": f2, "pairs": result_en["pairs"], "probability": prob, "time": result_tel["time"]}
+        return {"fidelity": f2, "pairs": result_en["pairs"], "probability": prob, "time": result_tel["time"]}
 
     dc = DataCollector(record_run, include_time_stamp=False,
                        include_entity_name=False)
@@ -321,44 +323,48 @@ def save_plot(datas, column, title, prefix):
         'title': title
     }
     data = datas.groupby("node_distance")[column].agg(
-        mean='mean', sem='sem').reset_index()
-    save_dir = "./plots_test"
-    count = len([f for f in os.listdir(save_dir)
+        **{column:'mean', 'sem':'sem'}).reset_index()
+    save_dir = "./plots_test/bennet/node_distance"
+    count1 = len([f for f in os.listdir(save_dir)
                  if f.startswith(prefix)])
-    filename = f"{save_dir}/{prefix}_{count + 1}.png"
+    filename = f"{save_dir}/{prefix}_{count1 + 1}.png"
     data.plot(
         x='node_distance',
-        y='mean',
+        y=column,
         yerr='sem',
         **plot_style
     )
     plt.savefig(filename)
     plt.close()
     print(f"Plot saved as {filename}")
+    count2 = len([f for f in os.listdir(save_dir)
+                if f.startswith(column + " summary")])
+    data[['node_distance', column]].to_csv(f"{save_dir}/{column} summary_{count2 + 1}.csv")
 
 def create_plot():
     matplotlib.use('Agg')
-    node_distances = [1 + i for i in range(0, 1000, 100)]
+    node_distances = [1 + i for i in range(0, 1000, 50)]
+    #noise_rate = [i for i in range(0, 1500, 100)]
     datas = run_experiment(node_distances)
     save_plot(
         datas,
-        column="F2",
-        title="Fidelity of the teleported quantum state with bennet",
+        column="fidelity",
+        title="Fidelity of the teleported quantum state with bennet - depolar_rate=100 Hz",
         prefix="Bennet fidelity"
     )
     save_plot(
         datas,
         column="probability",
-        title="Probability of success - bennet",
+        title="Probability of success with bennet - depolar_rate=100 Hz",
         prefix="Bennet probability"
     )
     save_plot(
         datas,
         column="pairs",
-        title="Number of entanglement pairs used with bennet",
+        title="Number of entanglement pairs used with bennet - depolar_rate=100 Hz",
         prefix="Bennet pairs"
     )
-    save_dir = "./plots_test"
+    save_dir = "./plots_test/bennet/node_distance"
     count = len([f for f in os.listdir(save_dir)
                  if f.startswith("Bennet result")])
     datas.to_csv(f"{save_dir}/Bennet result_{count + 1}.csv")
@@ -368,7 +374,7 @@ if __name__ == "__main__":
     #be_example, dc = sim_setup(network.get_node("node_A"), network.get_node("node_B"), num_runs=10)
     #be_example.start()
     #ns.sim_run()
-    #print("Average fidelity of generated entanglement with bennet: {}".format(dc.dataframe["F2"].mean()))
+    #print("Average fidelity of generated entanglement with bennet: {}".format(dc.dataframe["fidelity"].mean()))
     #print("Average resource with bennet: {}".format(dc.dataframe["pairs"].mean()))
     #print("Average probability of success with bennet: {}".format(dc.dataframe["probability"].mean()))
     create_plot()

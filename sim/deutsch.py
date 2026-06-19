@@ -263,7 +263,7 @@ class DistilExample(LocalProtocol):
             #print(f"Simulation {i}: Finish")
 
 
-def example_network_setup(source_delay=1e5, source_fidelity_sq=0.8, depolar_rate=1500,
+def example_network_setup(source_delay=1e5, source_fidelity_sq=0.8, depolar_rate=100,
                           node_distance=30):
     network = Network("network")
 
@@ -343,7 +343,7 @@ def example_sim_setup(node_a, node_b, num_runs):
         q_B, = node_b.qmemory.pop(positions=[result[0]["pos_B"]])
         f2 = qapi.fidelity(q_B, ks.y0, squared=True)
         prob = 1 / result[1]["runs"]
-        return {"F2": f2, "pairs": result[0]["pairs"], "probability": prob, "time": result[0]["time"]}
+        return {"fidelity": f2, "pairs": result[0]["pairs"], "probability": prob, "time": result[0]["time"]}
 
     dc = DataCollector(record_run, include_time_stamp=False,
                        include_entity_name=False)
@@ -374,44 +374,48 @@ def save_plot(datas, column, title, prefix):
         'title': title
     }
     data = datas.groupby("node_distance")[column].agg(
-        mean='mean', sem='sem').reset_index()
-    save_dir = "./plots_test"
-    count = len([f for f in os.listdir(save_dir)
+        **{column:'mean', 'sem':'sem'}).reset_index()
+    save_dir = "./plots_test/deutsch/node_distance"
+    count1 = len([f for f in os.listdir(save_dir)
                  if f.startswith(prefix)])
-    filename = f"{save_dir}/{prefix}_{count + 1}.png"
+    filename = f"{save_dir}/{prefix}_{count1 + 1}.png"
     data.plot(
         x='node_distance',
-        y='mean',
+        y=column,
         yerr='sem',
         **plot_style
     )
     plt.savefig(filename)
     plt.close()
     print(f"Plot saved as {filename}")
+    count2 = len([f for f in os.listdir(save_dir)
+                if f.startswith(column + " summary")])
+    data[['node_distance', column]].to_csv(f"{save_dir}/{column} summary_{count2 + 1}.csv")
 
 def create_plot():
     matplotlib.use('Agg')
-    node_distances = [1 + i for i in range(0, 100, 5)]
+    node_distances = [1 + i for i in range(0, 1000, 50)]
+    #noise_rate = [i for i in range(0, 1500, 100)]
     datas = run_experiment(node_distances)
     save_plot(
         datas,
-        column="F2",
-        title="Fidelity of the teleported quantum state with deutsch",
+        column="fidelity",
+        title="Fidelity of the teleported quantum state with deutsch - depolar_rate=100 Hz",
         prefix="Deutsch fidelity"
     )
     save_plot(
         datas,
         column="probability",
-        title="Probability of success - deutsch",
+        title="Probability of success with deutsch - depolar_rate=100 Hz",
         prefix="Deutsch probability"
     )
     save_plot(
         datas,
         column="pairs",
-        title="Number of entanglement pairs used with deutsch",
+        title="Number of entanglement pairs used with deutsch - depolar_rate=100 Hz",
         prefix="Deutsch pairs"
     )
-    save_dir = "./plots_test"
+    save_dir = "./plots_test/deutsch/node_distance"
     count = len([f for f in os.listdir(save_dir) if f.startswith("Deutsch result")])
     datas.to_csv(f"{save_dir}/Deutsch result_{count + 1}.csv")
 
@@ -421,7 +425,7 @@ if __name__ == "__main__":
     #filt_example, dc = example_sim_setup(network.get_node("node_A"),network.get_node("node_B"),num_runs=5)
     #filt_example.start()
     #ns.sim_run()
-    #print("Average fidelity of generated entanglement with distil: {}".format(dc.dataframe["F2"].mean()))
+    #print("Average fidelity of generated entanglement with distil: {}".format(dc.dataframe["fidelity"].mean()))
     #print("Average resource with protection: {}".format(dc.dataframe["pairs"].mean()))
     #print("Average probability of success with protection: {}".format(dc.dataframe["probability"].mean()))
     create_plot()

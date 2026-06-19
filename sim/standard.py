@@ -72,7 +72,7 @@ class Example(LocalProtocol): # シミュレーション全体のプロトコル
             #print(f"Simulation {i} Finish")
 
 
-def example_network_setup(source_delay=1e5, source_fidelity_sq=0.8, depolar_rate=1500,
+def example_network_setup(source_delay=1e5, source_fidelity_sq=0.8, depolar_rate=100,
                           node_distance=300): # 量子ネットワークの構築
     network = Network("network")
 
@@ -104,8 +104,7 @@ def example_network_setup(source_delay=1e5, source_fidelity_sq=0.8, depolar_rate
     # 量子チャネルを接続
     qchannel = QuantumChannel("QChannel_A->B", length=node_distance,
                               models={"quantum_noise_model": DepolarNoiseModel(depolar_rate),
-                                      "delay_model": FibreDelayModel(c=200e3)},
-                              depolar_rate=0)
+                                      "delay_model": FibreDelayModel(c=200e3)})
     port_name_a, port_name_b = network.add_connection(
         node_a, node_b, channel_to=qchannel, label="quantum", port_name_node1="qin_charlie", port_name_node2="qin_charlie")
 
@@ -155,25 +154,30 @@ def run_experiment(node_distances): # シミュレーションを実行するた
 
 def create_plot(): #グラフ表示のための関数
     matplotlib.use('Agg')
-    node_distances = [1 + i for i in range(0, 100, 5)]
+    node_distances = [1 + i for i in range(0, 1000, 50)]
+    #noise_rate = [i for i in range(0, 1500, 100)]
     fidelities = run_experiment(node_distances)
+    # タイトルの固定値を変更すること
     plot_style = {'kind': 'scatter', 'grid': True,
-                  'title': "Fidelity of the teleported quantum state"}
+                  'title': "Fidelity of the teleported quantum state - depolar_rate=100 Hz"}
     data = fidelities.groupby("node_distance")['F2'].agg(
         fidelity='mean', sem='sem').reset_index()
-    save_dir = "./plots_clean/node1500"
-    existing_files = len([f for f in os.listdir(save_dir) if f.startswith("Original_Teleportation")])
-    filename = f"{save_dir}/Original_Teleportation fidelity_{existing_files + 1}.png"
+    save_dir = "./plots_test/standard/node_distance"
+    existing_files1 = len([f for f in os.listdir(save_dir) if f.startswith("Teleportation fidelity")])
+    filename = f"{save_dir}/Teleportation fidelity_{existing_files1 + 1}.png"
     data.plot(x='node_distance', y='fidelity', yerr='sem', **plot_style)
     plt.savefig(filename)
     print(f"Plot saved as {filename}")
-    fidelities.to_csv(f"{save_dir}/Original_Teleportation fidelity_{existing_files + 2}.csv")
+    existing_files2 = len([f for f in os.listdir(save_dir) if f.startswith("Teleportation result")])
+    fidelities.to_csv(f"{save_dir}/Teleportation result_{existing_files2 + 1}.csv")
+    existing_files3 = len([f for f in os.listdir(save_dir) if f.startswith("Teleportation summary")])
+    data[['node_distance', 'fidelity']].to_csv(f"{save_dir}/Teleportation summary{existing_files2 + 1}.csv")
 
 
 if __name__ == "__main__":
-    network = example_network_setup()
-    example, dc = example_sim_setup(network.get_node("node_A"),network.get_node("node_B"),num_runs=10)
-    example.start()
-    ns.sim_run()
-    print("Average fidelity of received qubit: {}".format(dc.dataframe["F2"].mean()))
-    #create_plot()
+    #network = example_network_setup()
+    #example, dc = example_sim_setup(network.get_node("node_A"),network.get_node("node_B"),num_runs=10)
+    #example.start()
+    #ns.sim_run()
+    #print("Average fidelity of received qubit: {}".format(dc.dataframe["F2"].mean()))
+    create_plot()
