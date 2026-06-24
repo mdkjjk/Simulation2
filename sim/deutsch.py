@@ -400,19 +400,19 @@ def create_plot():
     save_plot(
         datas,
         column="fidelity",
-        title="Fidelity of the teleported quantum state with deutsch - depolar_rate=100 Hz",
+        title="Fidelity of the teleported quantum state with deutsch\n(depolar_rate=100 Hz)",
         prefix="Deutsch fidelity"
     )
     save_plot(
         datas,
         column="probability",
-        title="Probability of success with deutsch - depolar_rate=100 Hz",
+        title="Probability of success with deutsch\n(depolar_rate=100 Hz)",
         prefix="Deutsch probability"
     )
     save_plot(
         datas,
         column="pairs",
-        title="Number of entanglement pairs used with deutsch - depolar_rate=100 Hz",
+        title="Number of entanglement pairs used with deutsch\n(depolar_rate=100 Hz)",
         prefix="Deutsch pairs"
     )
     save_dir = "./plots_test/deutsch/node_distance"

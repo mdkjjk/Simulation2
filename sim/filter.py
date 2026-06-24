@@ -423,19 +423,19 @@ def create_plot():
     save_plot(
         datas,
         column="fidelity",
-        title="Fidelity of the teleported quantum state with filter - depolar_rate=100 Hz",
+        title="Fidelity of the teleported quantum state with filter\n(depolar_rate=100 Hz)",
         prefix="Filter fidelity"
     )
     save_plot(
         datas,
         column="probability",
-        title="Probability of success with filter - depolar_rate=100 Hz",
+        title="Probability of success with filter\n(depolar_rate=100 Hz)",
         prefix="Filter probability"
     )
     save_plot(
         datas,
         column="pairs",
-        title="Number of entanglement pairs used with filter - depolar_rate=100 Hz",
+        title="Number of entanglement pairs used with filter\n(depolar_rate=100 Hz)",
         prefix="Filter pairs"
     )
     save_dir = "./plots_test/filter/node_distance"

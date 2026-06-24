@@ -329,6 +329,9 @@ def network_setup(source_delay=1e5, source_fidelity_sq=0.9, damp_rate=200, node_
     network.add_connection(node_a, node_b, connection=conn_cchannel,
                            port_name_node1="cout_bob", port_name_node2="cin_alice")
     # quantum_noise_modelに振幅減衰ノイズを指定
+    # "quantum_noise_model": DepolarNoiseModel(depolar_rate=depolar_rate, time_independent=False)
+    # "quantum_noise_model": AmplitudeNoiseModel(gamma=damp_rate, time_independent=False)
+    # "quantum_noise_model": PhaseNoiseModel(gamma=damp_rate, time_independent=False)
     qchannel = QuantumChannel("QChannel_A->B", length=node_distance,
                               models={"quantum_noise_model": AmplitudeNoiseModel(gamma=damp_rate, time_independent=False),
                                       "delay_model": FibreDelayModel(c=200e3)})
@@ -415,7 +418,7 @@ def sim_setup(node_a, node_b, num_runs, omega, theta):
         #print(qapi.reduced_dm([q_A, q_B]))
         f2 = qapi.fidelity(q_B, ks.y0, squared=True)
         prob = 1 / result_en["runs"]
-        return {"F2": f2, "pairs": result_en["pairs"], "probability": prob, "time": result_tel["time"]}
+        return {"fidelity": f2, "pairs": result_en["pairs"], "probability": prob, "time": result_tel["time"]}
 
     dc = DataCollector(record_run, include_time_stamp=False,
                        include_entity_name=False)
@@ -431,7 +434,7 @@ def run_experiment(var_o, var_t):
             network = network_setup()
             node_a = network.get_node("node_A")
             node_b = network.get_node("node_B")
-            pro_example, dc = sim_setup(node_a, node_b, 10, omega, theta)
+            pro_example, dc = sim_setup(node_a, node_b, 100, omega, theta)
             pro_example.start()
             ns.sim_run()
             df = dc.dataframe
@@ -454,12 +457,20 @@ def save_heatmap(dataframe, value_col, title, colorbar_label, filename_prefix, v
     plt.xlabel(r'WM strength $\omega$')
     plt.ylabel(r'WMR strength $\theta$')
     plt.title(title)
-    save_dir = "./plots_test"
-    count = len([f for f in os.listdir(save_dir) if f.startswith(filename_prefix)])
-    filename = f"{save_dir}/{filename_prefix}_{count + 1}.png"
+    save_dir = "./plots_test/protect"
+    count1 = len([f for f in os.listdir(save_dir) if f.startswith(filename_prefix)])
+    filename = f"{save_dir}/{filename_prefix}_{count1 + 1}.png"
     plt.savefig(filename)
     plt.close()
+    if value_col == "fidelity":
+        max_fid = data["fidelity"].max()
+        best_rows = data[data["fidelity"] == max_fid]
+        print("Optimal value is")
+        print(best_rows)
     print(f"Plot saved as {filename}")
+    count2 = len([f for f in os.listdir(save_dir)
+                if f.startswith(value_col + " summary")])
+    data[['omega', 'theta', value_col]].to_csv(f"{save_dir}/{value_col} summary_{count2 + 1}.csv")
 
 def create_plot():
     matplotlib.use('Agg')
@@ -469,8 +480,8 @@ def create_plot():
     # 忠実度
     save_heatmap(
         datas,
-        value_col="F2",
-        title="Fidelity Heatmap with protection",
+        value_col="fidelity",
+        title="Fidelity Heatmap with protection\n(damp_rate=200 Hz, node_distance=300 km)",
         colorbar_label="Average Fidelity",
         filename_prefix="Protect fidelity",
         var_o=var_o,
@@ -480,7 +491,7 @@ def create_plot():
     save_heatmap(
         datas,
         value_col="probability",
-        title="Success Probability Heatmap with protection",
+        title="Success Probability Heatmap with protection\n(damp_rate=200 Hz, node_distance=300 km)",
         colorbar_label="Average Success Probability",
         filename_prefix="Protect probability",
         var_o=var_o,
@@ -490,13 +501,13 @@ def create_plot():
     save_heatmap(
         datas,
         value_col="pairs",
-        title="Entanglement Pair Usage Heatmap with protection",
+        title="Entanglement Pair Usage Heatmap with protection\n(damp_rate=200 Hz, node_distance=300 km)",
         colorbar_label="Average Number of Pairs",
         filename_prefix="Protect pairs",
         var_o=var_o,
         var_t=var_t
     )
-    save_dir = "./plots_test"
+    save_dir = "./plots_test/protect"
     count = len([f for f in os.listdir(save_dir) if f.startswith("Protect result")])
     datas.to_csv(f"{save_dir}/Protect result_{count + 1}.csv")
         
@@ -505,7 +516,7 @@ if __name__ == "__main__":
     #pro_example, dc = sim_setup(network.get_node("node_A"), network.get_node("node_B"), 1, np.pi/3, 0.2)
     #pro_example.start()
     #ns.sim_run()
-    #print("Average fidelity of generated entanglement with protection: {}".format(dc.dataframe["F2"].mean()))
+    #print("Average fidelity of generated entanglement with protection: {}".format(dc.dataframe["fidelity"].mean()))
     #print("Average resource with protection: {}".format(dc.dataframe["pairs"].mean()))
     #print("Average probability of success with protection: {}".format(dc.dataframe["probability"].mean()))
     create_plot()

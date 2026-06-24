@@ -172,7 +172,7 @@ class WMeasure(NodeProtocol):
             yield self.await_program(self.node.qmemory)
         yield self.node.qmemory.execute_program(self._rotation_program(mresult, rot_axis), self._qmem_positions)
 
-def network_setup(source_delay=1e5, source_fidelity_sq=0.9, damp_rate=50, node_distance=2000):
+def network_setup(source_delay=1e5, source_fidelity_sq=0.9, damp_rate=100, node_distance=300):
     network = Network("wmeasure_network")
 
     # ノード設定
@@ -189,6 +189,9 @@ def network_setup(source_delay=1e5, source_fidelity_sq=0.9, damp_rate=50, node_d
     network.add_connection(node_a, node_b, connection=conn_cchannel,
                            port_name_node1="cout_bob", port_name_node2="cin_alice")
     # quantum_noise_modelに振幅減衰ノイズを指定
+    # "quantum_noise_model": DepolarNoiseModel(depolar_rate=depolar_rate, time_independent=False)
+    # "quantum_noise_model": AmplitudeNoiseModel(gamma=damp_rate, time_independent=False)
+    # "quantum_noise_model": PhaseNoiseModel(gamma=damp_rate, time_independent=False)
     qchannel = QuantumChannel("QChannel_A->B", length=node_distance,
                               models={"quantum_noise_model": PhaseNoiseModel(gamma=damp_rate, time_independent=False),
                                       "delay_model": FibreDelayModel(c=200e3)})
@@ -239,7 +242,7 @@ def sim_setup(node_a, node_b, num_runs, theta, eta):
         ideal_state = result["ideal_state"]
         q, = node_b.qmemory.pop(positions=[result["pos_B"]])
         f2 = qapi.fidelity(q, ideal_state, squared=True)
-        return {"F2": f2, "time": result["time"]}
+        return {"fidelity": f2, "time": result["time"]}
 
     dc = DataCollector(record_run, include_time_stamp=False,
                        include_entity_name=False)
@@ -255,7 +258,7 @@ def run_experiment(var_t, var_e):
             network = network_setup()
             node_a = network.get_node("node_A")
             node_b = network.get_node("node_B")
-            wm_example, dc = sim_setup(node_a, node_b, 2, theta, eta)
+            wm_example, dc = sim_setup(node_a, node_b, 100, theta, eta)
             wm_example.start()
             ns.sim_run()
             df = dc.dataframe
@@ -269,8 +272,8 @@ def create_plot():
     var_t = [i for i in np.arange(0.0, np.pi/2, np.pi/12)]
     var_e = [i for i in np.arange(0.0, np.pi, np.pi/12)]
     fidelities = run_experiment(var_t, var_e)
-    data = fidelities.groupby(["theta", "eta"])['F2'].mean().reset_index()
-    heatmap_data = data.pivot(index='eta', columns='theta', values='F2')
+    data = fidelities.groupby(["theta", "eta"])['fidelity'].mean().reset_index()
+    heatmap_data = data.pivot(index='eta', columns='theta', values='fidelity')
     plt.figure(figsize=(8, 6))
     im = plt.imshow(heatmap_data, origin='lower', aspect='auto', extent=[min(var_t), max(var_t),min(var_e),max(var_e)])
     # カラーバー
@@ -279,19 +282,26 @@ def create_plot():
     plt.xlabel(r'Measurement strength $\theta$')
     plt.ylabel(r'Rotation angle $\eta$')
     # タイトル
-    plt.title("Fidelity Heatmap with weak measurement")
-    save_dir = "./plots_test"
+    plt.title("Fidelity Heatmap with weak measurement\n(damp_rate=100, node_distance=300)")
+    save_dir = "./plots_test/wm"
     existing_files1 = len([f for f in os.listdir(save_dir) if f.startswith("WM fidelity")])
     filename = f"{save_dir}/WM fidelity_{existing_files1 + 1}.png"
     plt.savefig(filename)
+    max_fid = data["fidelity"].max()
+    best_rows = data[data["fidelity"] == max_fid]
+    print("Optimal value is")
+    print(best_rows)
     print(f"Plot saved as {filename}")
     existing_files2 = len([f for f in os.listdir(save_dir) if f.startswith("WM result")])
     fidelities.to_csv(f"{save_dir}/WM result_{existing_files2 + 1}.csv")
+    count = len([f for f in os.listdir(save_dir)
+                if f.startswith("fidelity summary")])
+    data[['theta', 'eta', 'fidelity']].to_csv(f"{save_dir}/fidelity summary_{count + 1}.csv")
 
 if __name__ == "__main__":
     #network = network_setup()
     #wm_example, dc = sim_setup(network.get_node("node_A"), network.get_node("node_B"), 10, 0.3, 0.5)
     #wm_example.start()
     #ns.sim_run()
-    #print("Average fidelity of generated entanglement with WM: {}".format(dc.dataframe["F2"].mean()))
+    #print("Average fidelity of generated entanglement with WM: {}".format(dc.dataframe["fidelity"].mean()))
     create_plot()
