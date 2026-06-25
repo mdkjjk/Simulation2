@@ -183,19 +183,18 @@ class Bennet(NodeProtocol):
             return False
         return True
 
-def network_setup(source_delay=1e5, source_fidelity_sq=0.9, depolar_rate=100, node_distance=300):
+def network_setup(source_delay=1e5, source_fidelity_sq=0.8, damp_rate=100, node_distance=200):
     network = Network("bennet_network")
 
     # ノード設定
     node_a, node_b = network.add_nodes(["node_A", "node_B"])
-    node_a.add_subcomponent(QuantumProcessor("QuantumMemory_A", num_positions=11,
+    node_a.add_subcomponent(QuantumProcessor("QuantumMemory_A", num_positions=6,
         fallback_to_nonphysical=True))   # パラメータ「memory_noise_models」によりメモリ滞在によるノイズの影響を設定可能
     state_sampler = StateSampler([ks.b11, ks.s00], probabilities=[source_fidelity_sq, 1 - source_fidelity_sq])
-    source_frequency = 4e4 / node_distance
     node_a.add_subcomponent(QSource("QSource_A", state_sampler=state_sampler,
         models={"emission_delay_model": FixedDelayModel(delay=source_delay)},
         num_ports=2, status=SourceStatus.EXTERNAL))
-    node_b.add_subcomponent(QuantumProcessor("QuantumMemory_B", num_positions=11,
+    node_b.add_subcomponent(QuantumProcessor("QuantumMemory_B", num_positions=6,
         fallback_to_nonphysical=True))   # パラメータ「memory_noise_models」によりメモリ滞在によるノイズの影響を設定可能
 
     # チャネル設定
@@ -209,7 +208,7 @@ def network_setup(source_delay=1e5, source_fidelity_sq=0.9, depolar_rate=100, no
     # "quantum_noise_model": AmplitudeNoiseModel(gamma=damp_rate, time_independent=False)
     # "quantum_noise_model": PhaseNoiseModel(gamma=damp_rate, time_independent=False)
     qchannel = QuantumChannel("QChannel_A->B", length=node_distance,
-                              models={"quantum_noise_model": DepolarNoiseModel(depolar_rate=depolar_rate, time_independent=False),
+                              models={"quantum_noise_model": AmplitudeNoiseModel(gamma=damp_rate, time_independent=False),
                                       "delay_model": FibreDelayModel(c=200e3)})
     port_name_a, port_name_b = network.add_connection(
         node_a, node_b, channel_to=qchannel, label="quantum")
@@ -308,7 +307,7 @@ def run_experiment(node_distances):
         network = network_setup(node_distance=node_distance)
         node_a = network.get_node("node_A")
         node_b = network.get_node("node_B")
-        be_example, dc = sim_setup(node_a, node_b, 100)
+        be_example, dc = sim_setup(node_a, node_b, 1000)
         be_example.start()
         ns.sim_run()
         df = dc.dataframe
@@ -324,7 +323,7 @@ def save_plot(datas, column, title, prefix):
     }
     data = datas.groupby("node_distance")[column].agg(
         **{column:'mean', 'sem':'sem'}).reset_index()
-    save_dir = "./plots_test/bennet/node_distance"
+    save_dir = "./plots_test/bennet/node_distance/phase"
     count1 = len([f for f in os.listdir(save_dir)
                  if f.startswith(prefix)])
     filename = f"{save_dir}/{prefix}_{count1 + 1}.png"
@@ -341,30 +340,96 @@ def save_plot(datas, column, title, prefix):
                 if f.startswith(column + " summary")])
     data[['node_distance', column]].to_csv(f"{save_dir}/{column} summary_{count2 + 1}.csv")
 
-def create_plot():
+def create_plot_node():
     matplotlib.use('Agg')
-    node_distances = [1 + i for i in range(0, 1000, 50)]
-    #noise_rate = [i for i in range(0, 1500, 100)]
+    node_distances = [i for i in range(10, 1000, 50)]
     datas = run_experiment(node_distances)
     save_plot(
         datas,
         column="fidelity",
-        title="Fidelity of the teleported quantum state with bennet\n(depolar_rate=100 Hz)",
+        title="Fidelity of the teleported quantum state with bennet\n(damp_rate=100 Hz)",
         prefix="Bennet fidelity"
     )
     save_plot(
         datas,
         column="probability",
-        title="Probability of success with bennet\n(depolar_rate=100 Hz)",
+        title="Probability of success with bennet\n(damp_rate=100 Hz)",
         prefix="Bennet probability"
     )
     save_plot(
         datas,
         column="pairs",
-        title="Number of entanglement pairs used with bennet\n(depolar_rate=100 Hz)",
+        title="Number of entanglement pairs used with bennet\n(damp_rate=100 Hz)",
         prefix="Bennet pairs"
     )
-    save_dir = "./plots_test/bennet/node_distance"
+    save_dir = "./plots_test/bennet/node_distance/phase"
+    count = len([f for f in os.listdir(save_dir)
+                 if f.startswith("Bennet result")])
+    datas.to_csv(f"{save_dir}/Bennet result_{count + 1}.csv")
+
+def run_experiment_noise(noise_rate):
+    fidelity_data = pandas.DataFrame()
+    for noise in noise_rate:
+        ns.sim_reset()
+        network = network_setup(damp_rate=noise)
+        node_a = network.get_node("node_A")
+        node_b = network.get_node("node_B")
+        be_example, dc = sim_setup(node_a, node_b, 1000)
+        be_example.start()
+        ns.sim_run()
+        df = dc.dataframe
+        df['damp_rate'] = noise
+        fidelity_data = pandas.concat([fidelity_data, df])
+    return fidelity_data
+
+def save_plot_noise(datas, column, title, prefix):
+    plot_style = {
+        'kind': 'scatter',
+        'grid': True,
+        'title': title
+    }
+    data = datas.groupby("damp_rate")[column].agg(
+        **{column:'mean', 'sem':'sem'}).reset_index()
+    save_dir = "./plots_test/bennet/noise/amplitude"
+    count1 = len([f for f in os.listdir(save_dir)
+                 if f.startswith(prefix)])
+    filename = f"{save_dir}/{prefix}_{count1 + 1}.png"
+    data.plot(
+        x='damp_rate',
+        y=column,
+        yerr='sem',
+        **plot_style
+    )
+    plt.savefig(filename)
+    plt.close()
+    print(f"Plot saved as {filename}")
+    count2 = len([f for f in os.listdir(save_dir)
+                if f.startswith(column + " summary")])
+    data[['damp_rate', column]].to_csv(f"{save_dir}/{column} summary_{count2 + 1}.csv")
+
+def create_plot_noise():
+    matplotlib.use('Agg')
+    noise_rate = [i for i in range(0, 1500, 100)]
+    datas = run_experiment_noise(noise_rate)
+    save_plot_noise(
+        datas,
+        column="fidelity",
+        title="Fidelity of the teleported quantum state with bennet\n(node_distance=200 km)",
+        prefix="Bennet fidelity"
+    )
+    save_plot_noise(
+        datas,
+        column="probability",
+        title="Probability of success with bennet\n(node_distance=200 km)",
+        prefix="Bennet probability"
+    )
+    save_plot_noise(
+        datas,
+        column="pairs",
+        title="Number of entanglement pairs used with bennet\n(node_distance=200 km)",
+        prefix="Bennet pairs"
+    )
+    save_dir = "./plots_test/bennet/noise/amplitude"
     count = len([f for f in os.listdir(save_dir)
                  if f.startswith("Bennet result")])
     datas.to_csv(f"{save_dir}/Bennet result_{count + 1}.csv")
@@ -377,4 +442,4 @@ if __name__ == "__main__":
     #print("Average fidelity of generated entanglement with bennet: {}".format(dc.dataframe["fidelity"].mean()))
     #print("Average resource with bennet: {}".format(dc.dataframe["pairs"].mean()))
     #print("Average probability of success with bennet: {}".format(dc.dataframe["probability"].mean()))
-    create_plot()
+    create_plot_noise()
