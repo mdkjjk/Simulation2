@@ -107,9 +107,9 @@ class Correction(NodeProtocol): # 量子テレポーテーションにおけるB
             # 上記の2つが完了した場合
             if meas_results is not None and entanglement_ready:
                 # 測定結果に応じて、Z,Xゲートを適用
-                if meas_results[0] == 1:
+                if meas_results[0] == 0:
                     self.node.qmemory.execute_instruction(instr.INSTR_Z, [self._qmem_pos])
-                if meas_results[1] == 1:
+                if meas_results[1] == 0:
                     self.node.qmemory.execute_instruction(instr.INSTR_X, [self._qmem_pos])
                 self.send_signal(Signals.SUCCESS, self._qmem_pos) # プロトコルの成功シグナルと使用しているメモリポジションを送信
                 #print(f"{self.name}: Teleport success / time: {sim_time()}")

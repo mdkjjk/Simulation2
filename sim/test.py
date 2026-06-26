@@ -27,11 +27,20 @@ def create_werner_state(fidelity):
 
 q1, q2 = ns.qubits.create_qubits(2, no_state=True)
 ns.qubits.assign_qstate([q1, q2], ketstates.b00)
-print(qubitapi.reduced_dm([q1, q2]))
+print(f"b00 = \n{qubitapi.reduced_dm([q1, q2])}")
 
 q3, q4 = ns.qubits.create_qubits(2, no_state=True)
 ns.qubits.assign_qstate([q3, q4], ketstates.b11)
-print(qubitapi.reduced_dm([q3, q4]))
+print(f"b11 = \n{qubitapi.reduced_dm([q3, q4])}")
+
+q5, q6 = ns.qubits.create_qubits(2, no_state=True)
+ns.qubits.assign_qstate([q5, q6], ketstates.b01)
+print(f"b01 = \n{qubitapi.reduced_dm([q5, q6])}")
+
+q7, q8 = ns.qubits.create_qubits(2, no_state=True)
+ns.qubits.assign_qstate([q7, q8], ketstates.b10)
+print(f"b10 = \n{qubitapi.reduced_dm([q7, q8])}")
+
 qubitapi.operate(q2, ns.Z)
 qubitapi.operate(q2, ns.X)
 print(qubitapi.reduced_dm([q1, q2]))
