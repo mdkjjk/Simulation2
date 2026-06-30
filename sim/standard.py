@@ -92,8 +92,6 @@ def example_network_setup(source_delay=1e5, source_fidelity_sq=0.8, damp_rate=10
     node_b.add_subcomponent(QuantumProcessor(
         "QuantumMemory_B", num_positions=6, fallback_to_nonphysical=True,
         memory_noise_models=DepolarNoiseModel(0)))
-    node_a.add_ports(["cout_bob_dis", "cout_bob_fil"])
-    node_b.add_ports(["cin_alice_dis", "cin_alice_fil"])
 
     # 古典チャネルを接続
     cchannel = DirectConnection("CChannelConn_tel", ClassicalChannel("CChannel_dis_A->B", length=node_distance,
@@ -172,7 +170,7 @@ def run_experiment_noise(noise_rate):   # シミュレーションを実行す�
 
 def create_plot_node(): #グラフ表示のための関数
     matplotlib.use('Agg')
-    node_distances = [1 + i for i in range(0, 1000, 50)]
+    node_distances = [i for i in range(10, 1000, 50)]
     fidelities = run_experiment_node(node_distances)
     # タイトルの固定値を変更すること
     plot_style = {'kind': 'scatter', 'grid': True,

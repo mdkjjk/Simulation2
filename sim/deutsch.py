@@ -218,8 +218,8 @@ class DistilExample(LocalProtocol):
         self.add_subprotocol(
             EntangleNodes(node=node_b, role="receiver", input_mem_pos=0, num_pairs=2,
                           name="entangle_B"))
-        self.add_subprotocol(Distil(node_a, node_a.ports["cout_bob_dis"], role="A", name="purify_A"))
-        self.add_subprotocol(Distil(node_b, node_b.ports["cin_alice_dis"], role="B", name="purify_B"))
+        self.add_subprotocol(Distil(node_a, node_a.ports["cout_bob"], role="A", name="purify_A"))
+        self.add_subprotocol(Distil(node_b, node_b.ports["cin_alice"], role="B", name="purify_B"))
         self.add_subprotocol(BellMeasurement(node=node_a, port=node_a.ports["cout_bob"], name="teleport_A"))
         self.add_subprotocol(Correction(node=node_b, name="teleport_B"))
         self.subprotocols["purify_A"].start_expression = (
@@ -263,13 +263,13 @@ class DistilExample(LocalProtocol):
             #print(f"Simulation {i}: Finish")
 
 
-def example_network_setup(source_delay=1e5, source_fidelity_sq=0.8, depolar_rate=100,
-                          node_distance=30):
+def network_setup(source_delay=1e5, source_fidelity_sq=0.8, damp_rate=100,
+                          node_distance=200):
     network = Network("network")
 
     node_a, node_b = network.add_nodes(["node_A", "node_B"])
     node_a.add_subcomponent(QuantumProcessor(
-        "QuantumMemory_A", num_positions=2, fallback_to_nonphysical=True,
+        "QuantumMemory_A", num_positions=6, fallback_to_nonphysical=True,
         memory_noise_models=DepolarNoiseModel(0)))
     state_sampler = StateSampler([ks.b00, ks.s00],
         probabilities=[source_fidelity_sq, 1 - source_fidelity_sq])
@@ -278,34 +278,24 @@ def example_network_setup(source_delay=1e5, source_fidelity_sq=0.8, depolar_rate
         models={"emission_delay_model": FixedDelayModel(delay=source_delay)},
         num_ports=2, status=SourceStatus.EXTERNAL))
     node_b.add_subcomponent(QuantumProcessor(
-        "QuantumMemory_B", num_positions=2, fallback_to_nonphysical=True,
+        "QuantumMemory_B", num_positions=6, fallback_to_nonphysical=True,
         memory_noise_models=DepolarNoiseModel(0)))
-    node_a.add_ports(["cout_bob_dis", "cout_bob_fil"])
-    node_b.add_ports(["cin_alice_dis", "cin_alice_fil"])
 
-    conn_cchannel_dis = DirectConnection("CChannelConn_dis_AB",
-        ClassicalChannel("CChannel_dis_A->B", length=node_distance,
+    conn_cchannel = DirectConnection("CChannelConn_AB",
+        ClassicalChannel("CChannel_A->B", length=node_distance,
                          models={"delay_model": FibreDelayModel(c=200e3)}),
-        ClassicalChannel("CChannel_dis_B->A", length=node_distance,
+        ClassicalChannel("CChannel_B->A", length=node_distance,
                          models={"delay_model": FibreDelayModel(c=200e3)}))
-    network.add_connection(node_a, node_b, connection=conn_cchannel_dis, label="distil",
-                           port_name_node1="cout_bob_dis", port_name_node2="cin_alice_dis")
-    conn_cchannel_fil = DirectConnection("CChannelConn_fil_AB",
-        ClassicalChannel("CChannel_fil_A->B", length=node_distance,
-                         models={"delay_model": FibreDelayModel(c=200e3)}),
-        ClassicalChannel("CChannel_fil_B->A", length=node_distance,
-                         models={"delay_model": FibreDelayModel(c=200e3)}))
-    network.add_connection(node_a, node_b, connection=conn_cchannel_fil, label="filter",
-                           port_name_node1="cout_bob_fil", port_name_node2="cin_alice_fil")
-    cchannel = DirectConnection("CChannelConn_tel", ClassicalChannel("CChannel_dis_A->B", length=node_distance,
-                                models={"delay_model": FibreDelayModel(c=200e3)}))
-    network.add_connection(node_a, node_b, connection=cchannel, label="tereport",
+    network.add_connection(node_a, node_b, connection=conn_cchannel, label="distil",
                            port_name_node1="cout_bob", port_name_node2="cin_alice")
     # node_A.connect_to(node_B, conn_cchannel)
+    # 量子チャネルを接続
+    # "quantum_noise_model": DepolarNoiseModel(depolar_rate=depolar_rate, time_independent=False)
+    # "quantum_noise_model": AmplitudeNoiseModel(gamma=damp_rate, time_independent=False)
+    # "quantum_noise_model": PhaseNoiseModel(gamma=damp_rate, time_independent=False)
     qchannel = QuantumChannel("QChannel_A->B", length=node_distance,
-                              models={"quantum_noise_model": DepolarNoiseModel(depolar_rate),
-                                      "delay_model": FibreDelayModel(c=200e3)},
-                              depolar_rate=0)
+                              models={"quantum_noise_model": PhaseNoiseModel(gamma=damp_rate, time_independent=False),
+                                      "delay_model": FibreDelayModel(c=200e3)})
     port_name_a, port_name_b = network.add_connection(
         node_a, node_b, channel_to=qchannel, label="quantum", port_name_node1="qin_charlie", port_name_node2="qin_charlie")
 
@@ -319,18 +309,8 @@ def example_network_setup(source_delay=1e5, source_fidelity_sq=0.8, depolar_rate
     return network
 
 
-def example_sim_setup(node_a, node_b, num_runs):
-    """Example simulation setup for purification protocols.
-
-    Returns
-    -------
-    :class:`~netsquid.examples.purify.FilteringExample`
-        Example protocol to run.
-    :class:`pandas.DataFrame`
-        Dataframe of collected data.
-
-    """
-    filt_example = DistilExample(node_a, node_b, num_runs=num_runs)
+def sim_setup(node_a, node_b, num_runs):
+    dis_example = DistilExample(node_a, node_b, num_runs=num_runs)
 
     def record_run(evexpr):
         # Callback that collects data each run
@@ -347,19 +327,19 @@ def example_sim_setup(node_a, node_b, num_runs):
 
     dc = DataCollector(record_run, include_time_stamp=False,
                        include_entity_name=False)
-    dc.collect_on(pd.EventExpression(source=filt_example,
+    dc.collect_on(pd.EventExpression(source=dis_example,
                                      event_type=Signals.SUCCESS.value))
-    return filt_example, dc
+    return dis_example, dc
 
 
 def run_experiment(node_distances):
     fidelity_data = pandas.DataFrame()
     for node_distance in node_distances:
         ns.sim_reset()
-        network = example_network_setup(node_distance=node_distance)
+        network = network_setup(node_distance=node_distance)
         node_a = network.get_node("node_A")
         node_b = network.get_node("node_B")
-        example, dc = example_sim_setup(node_a, node_b, 100)
+        example, dc = sim_setup(node_a, node_b, 1000)
         example.start()
         ns.sim_run()
         df = dc.dataframe
@@ -375,7 +355,7 @@ def save_plot(datas, column, title, prefix):
     }
     data = datas.groupby("node_distance")[column].agg(
         **{column:'mean', 'sem':'sem'}).reset_index()
-    save_dir = "./plots_test/deutsch/node_distance"
+    save_dir = "./plots_test/deutsch/node_distance/phase"
     count1 = len([f for f in os.listdir(save_dir)
                  if f.startswith(prefix)])
     filename = f"{save_dir}/{prefix}_{count1 + 1}.png"
@@ -394,8 +374,7 @@ def save_plot(datas, column, title, prefix):
 
 def create_plot():
     matplotlib.use('Agg')
-    node_distances = [1 + i for i in range(0, 1000, 50)]
-    #noise_rate = [i for i in range(0, 1500, 100)]
+    node_distances = [i for i in range(10, 1000, 50)]
     datas = run_experiment(node_distances)
     save_plot(
         datas,
@@ -415,17 +394,83 @@ def create_plot():
         title="Number of entanglement pairs used with deutsch\n(depolar_rate=100 Hz)",
         prefix="Deutsch pairs"
     )
-    save_dir = "./plots_test/deutsch/node_distance"
+    save_dir = "./plots_test/deutsch/node_distance/phase"
     count = len([f for f in os.listdir(save_dir) if f.startswith("Deutsch result")])
     datas.to_csv(f"{save_dir}/Deutsch result_{count + 1}.csv")
 
+def run_experiment_noise(noise_rate):
+    fidelity_data = pandas.DataFrame()
+    for noise in noise_rate:
+        ns.sim_reset()
+        network = network_setup(damp_rate=noise)
+        node_a = network.get_node("node_A")
+        node_b = network.get_node("node_B")
+        be_example, dc = sim_setup(node_a, node_b, 1000)
+        be_example.start()
+        ns.sim_run()
+        df = dc.dataframe
+        df['damp_rate'] = noise
+        fidelity_data = pandas.concat([fidelity_data, df])
+    return fidelity_data
+
+def save_plot_noise(datas, column, title, prefix):
+    plot_style = {
+        'kind': 'scatter',
+        'grid': True,
+        'title': title
+    }
+    data = datas.groupby("damp_rate")[column].agg(
+        **{column:'mean', 'sem':'sem'}).reset_index()
+    save_dir = "./plots_test/deutsch/noise/phase"
+    count1 = len([f for f in os.listdir(save_dir)
+                 if f.startswith(prefix)])
+    filename = f"{save_dir}/{prefix}_{count1 + 1}.png"
+    data.plot(
+        x='damp_rate',
+        y=column,
+        yerr='sem',
+        **plot_style
+    )
+    plt.savefig(filename)
+    plt.close()
+    print(f"Plot saved as {filename}")
+    count2 = len([f for f in os.listdir(save_dir)
+                if f.startswith(column + " summary")])
+    data[['damp_rate', column]].to_csv(f"{save_dir}/{column} summary_{count2 + 1}.csv")
+
+def create_plot_noise():
+    matplotlib.use('Agg')
+    noise_rate = [i for i in range(0, 1500, 100)]
+    datas = run_experiment_noise(noise_rate)
+    save_plot_noise(
+        datas,
+        column="fidelity",
+        title="Fidelity of the teleported quantum state with deutsch\n(node_distance=200 km)",
+        prefix="Deutsch fidelity"
+    )
+    save_plot_noise(
+        datas,
+        column="probability",
+        title="Probability of success with deutsch\n(node_distance=200 km)",
+        prefix="Deutsch probability"
+    )
+    save_plot_noise(
+        datas,
+        column="pairs",
+        title="Number of entanglement pairs used with deutsch\n(node_distance=200 km)",
+        prefix="Deutsch pairs"
+    )
+    save_dir = "./plots_test/deutsch/noise/phase"
+    count = len([f for f in os.listdir(save_dir)
+                 if f.startswith("Deutsch result")])
+    datas.to_csv(f"{save_dir}/Deutsch result_{count + 1}.csv")
 
 if __name__ == "__main__":
-    #network = example_network_setup()
-    #filt_example, dc = example_sim_setup(network.get_node("node_A"),network.get_node("node_B"),num_runs=5)
-    #filt_example.start()
+    #network = network_setup()
+    #dis_example, dc = sim_setup(network.get_node("node_A"),network.get_node("node_B"),num_runs=5)
+    #dis_example.start()
     #ns.sim_run()
     #print("Average fidelity of generated entanglement with distil: {}".format(dc.dataframe["fidelity"].mean()))
     #print("Average resource with protection: {}".format(dc.dataframe["pairs"].mean()))
     #print("Average probability of success with protection: {}".format(dc.dataframe["probability"].mean()))
-    create_plot()
+    create_plot_noise()
