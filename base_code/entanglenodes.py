@@ -286,3 +286,4 @@ if __name__ == "__main__":
     q1, = network.get_node("node_A").qmemory.peek(0)
     q2, = network.get_node("node_B").qmemory.peek(0)
     print("Fidelity of generated entanglement: {}".format(ns.qubits.fidelity([q1, q2], ks.b00)))
+    print("This example module is located at: {}".format(ns.examples.entanglenodes.__file__))
