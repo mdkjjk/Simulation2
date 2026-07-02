@@ -307,19 +307,19 @@ class RWMeasure(NodeProtocol):   # Bob側のプロトコル
 
         
 
-def network_setup(source_delay=1e5, source_fidelity_sq=0.9, damp_rate=200, node_distance=300):
+def network_setup(source_delay=1e5, source_fidelity_sq=0.8, depolar_rate=100, node_distance=260):
     network = Network("wmeasure_network")
 
     # ノード設定
     node_a, node_b = network.add_nodes(["node_A", "node_B"])
-    node_a.add_subcomponent(QuantumProcessor("QuantumMemory_A", num_positions=11,
+    node_a.add_subcomponent(QuantumProcessor("QuantumMemory_A", num_positions=6,
         fallback_to_nonphysical=True))   # パラメータ「memory_noise_models」によりメモリ滞在によるノイズの影響を設定可能
     state_sampler = StateSampler([ks.b00, ks.s00], probabilities=[source_fidelity_sq, 1 - source_fidelity_sq])
     source_frequency = 4e4 / node_distance
     node_a.add_subcomponent(QSource("QSource_A", state_sampler=state_sampler,
         models={"emission_delay_model": FixedDelayModel(delay=source_delay)},
         num_ports=2, status=SourceStatus.EXTERNAL))
-    node_b.add_subcomponent(QuantumProcessor("QuantumMemory_B", num_positions=11,
+    node_b.add_subcomponent(QuantumProcessor("QuantumMemory_B", num_positions=6,
         fallback_to_nonphysical=True))   # パラメータ「memory_noise_models」によりメモリ滞在によるノイズの影響を設定可能
 
     # チャネル設定
@@ -333,7 +333,7 @@ def network_setup(source_delay=1e5, source_fidelity_sq=0.9, damp_rate=200, node_
     # "quantum_noise_model": AmplitudeNoiseModel(gamma=damp_rate, time_independent=False)
     # "quantum_noise_model": PhaseNoiseModel(gamma=damp_rate, time_independent=False)
     qchannel = QuantumChannel("QChannel_A->B", length=node_distance,
-                              models={"quantum_noise_model": AmplitudeNoiseModel(gamma=damp_rate, time_independent=False),
+                              models={"quantum_noise_model": DepolarNoiseModel(depolar_rate=depolar_rate, time_independent=False),
                                       "delay_model": FibreDelayModel(c=200e3)})
     network.add_connection(node_a, node_b, channel_to=qchannel, label="quantum",
                            port_name_node1="qout_bob", port_name_node2="qin_alice")
@@ -434,7 +434,7 @@ def run_experiment(var_o, var_t):
             network = network_setup()
             node_a = network.get_node("node_A")
             node_b = network.get_node("node_B")
-            pro_example, dc = sim_setup(node_a, node_b, 100, omega, theta)
+            pro_example, dc = sim_setup(node_a, node_b, 1000, omega, theta)
             pro_example.start()
             ns.sim_run()
             df = dc.dataframe
@@ -457,7 +457,7 @@ def save_heatmap(dataframe, value_col, title, colorbar_label, filename_prefix, v
     plt.xlabel(r'WM strength $\omega$')
     plt.ylabel(r'WMR strength $\theta$')
     plt.title(title)
-    save_dir = "./plots_test/protect"
+    save_dir = "./plots_test/protect/node_distance/260/depolar"
     count1 = len([f for f in os.listdir(save_dir) if f.startswith(filename_prefix)])
     filename = f"{save_dir}/{filename_prefix}_{count1 + 1}.png"
     plt.savefig(filename)
@@ -474,14 +474,14 @@ def save_heatmap(dataframe, value_col, title, colorbar_label, filename_prefix, v
 
 def create_plot():
     matplotlib.use('Agg')
-    var_o = [i for i in np.arange(0.0, np.pi/2, np.pi/12)]
-    var_t = [i for i in np.arange(0.0, 1.0, 0.2)]
+    var_o = [i for i in np.arange(0.0, np.pi/2, np.pi/20)]
+    var_t = [i for i in np.arange(0.0, 1.0, 0.1)]
     datas = run_experiment(var_o, var_t)
     # 忠実度
     save_heatmap(
         datas,
         value_col="fidelity",
-        title="Fidelity Heatmap with protection\n(damp_rate=200 Hz, node_distance=300 km)",
+        title="Fidelity Heatmap with protection\n(depolar_rate=100 Hz, node_distance=260 km)",
         colorbar_label="Average Fidelity",
         filename_prefix="Protect fidelity",
         var_o=var_o,
@@ -491,7 +491,7 @@ def create_plot():
     save_heatmap(
         datas,
         value_col="probability",
-        title="Success Probability Heatmap with protection\n(damp_rate=200 Hz, node_distance=300 km)",
+        title="Success Probability Heatmap with protection\n(depolar_rate=100 Hz, node_distance=260 km)",
         colorbar_label="Average Success Probability",
         filename_prefix="Protect probability",
         var_o=var_o,
@@ -501,13 +501,13 @@ def create_plot():
     save_heatmap(
         datas,
         value_col="pairs",
-        title="Entanglement Pair Usage Heatmap with protection\n(damp_rate=200 Hz, node_distance=300 km)",
+        title="Entanglement Pair Usage Heatmap with protection\n(depolar_rate=100 Hz, node_distance=260 km)",
         colorbar_label="Average Number of Pairs",
         filename_prefix="Protect pairs",
         var_o=var_o,
         var_t=var_t
     )
-    save_dir = "./plots_test/protect"
+    save_dir = "./plots_test/protect/node_distance/260/depolar"
     count = len([f for f in os.listdir(save_dir) if f.startswith("Protect result")])
     datas.to_csv(f"{save_dir}/Protect result_{count + 1}.csv")
         
