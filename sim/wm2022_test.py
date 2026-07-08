@@ -69,21 +69,19 @@ if (mresult[0] == 1):
     operate(qb, ns.X)
 #print(ns.qubits.reduced_dm([qa, qb]))
 # 振幅減衰
-amplitude_dampen(qb, gamma=0.8, prob=1)
+amplitude_dampen(qb, gamma=0.3, prob=1)
 print(ns.qubits.reduced_dm([qa, qb]))
 # ポストフリップ操作
 if (mresult[0] == 1):
     operate(qb, ns.X)
-# 逆弱測定
-if (mresult[0] == 0):
-    mrresult = gmeasure(qb, meas_operators=wmr_ops0)
+    mrresult = gmeasure(qb, meas_operators=wmr_ops1)
     print(mrresult)
     if (mrresult[0] == 1):
         print("FAIL")
     else:
         print("SUCCESS")
-else:
-    mrresult = gmeasure(qb, meas_operators=wmr_ops1)
+else:   # 逆弱測定
+    mrresult = gmeasure(qb, meas_operators=wmr_ops0)
     print(mrresult)
     if (mrresult[0] == 1):
         print("FAIL")
@@ -93,7 +91,7 @@ print(ns.qubits.reduced_dm([qa, qb]))
 
 q1, q2 = create_qubits(2)
 assign_qstate([q1, q2], b00)
-amplitude_dampen(q2, gamma=0.8, prob=1)
+amplitude_dampen(q2, gamma=0.3, prob=1)
 print(ns.qubits.reduced_dm([q1, q2]))
 print(fidelity([qa, qb], b00))
 print(fidelity([q1, q2], b00))
