@@ -9,7 +9,7 @@ matplotlib.use("Agg")
 # フォルダ設定
 # ============================================
 
-BENNET_DIR = Path("./plots_test/bennet/node_distance")
+FILTER_DIR = Path("./plots_test/filter/node_distance")
 STANDARD_DIR = Path("./plots_test/standard/node_distance")
 
 NOISES = [
@@ -28,8 +28,8 @@ for noise in NOISES:
     # CSV読み込み
     # -------------------------------
 
-    bennet = pd.read_csv(
-        BENNET_DIR / noise / "Bennet result_1.csv"
+    filter = pd.read_csv(
+        FILTER_DIR / noise / "optimal summary_1.csv"
     )
 
     standard = pd.read_csv(
@@ -40,8 +40,8 @@ for noise in NOISES:
     # 平均と標準誤差
     # -------------------------------
 
-    bennet_data = (
-        bennet.groupby("node_distance")["fidelity"]
+    filter_data = (
+        filter.groupby("node_distance")["fidelity"]
             .agg(fidelity="mean", sem="sem")
             .reset_index()
     )
@@ -59,12 +59,12 @@ for noise in NOISES:
     plt.figure(figsize=(8,6))
 
     plt.errorbar(
-        bennet_data["node_distance"],
-        bennet_data["fidelity"],
-        yerr=bennet_data["sem"],
+        filter_data["node_distance"],
+        filter_data["fidelity"],
+        yerr=filter_data["sem"],
         marker="o",
         capsize=3,
-        label="Bennet"
+        label="Filter"
     )
 
     plt.errorbar(
@@ -78,11 +78,11 @@ for noise in NOISES:
     
     plt.xlabel("Node distance")
     plt.ylabel("Teleportation fidelity")
-    plt.title(f"{noise}")
+    plt.title(f"Fidelity of the teleported quantum state\n{noise}")
     plt.grid(True)
     plt.legend()
 
-    plt.savefig(f"./plots_test/bennet/node_distance/{noise}/{noise}_comparison.png", dpi=300)
+    plt.savefig(f"./plots_test/filter/node_distance/{noise}/{noise}_comparison.png", dpi=300)
     plt.close()
 
     print(f"Saved : {noise}_comparison.png")

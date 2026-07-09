@@ -55,7 +55,7 @@ for noise in NOISES:
     result_df = result_df[cols]
 
     # CSV保存
-    save_csv = BASE_DIR / f"{noise}_max_fidelity.csv"
+    save_csv = BASE_DIR / "Protect max fidelity.csv"
     result_df.to_csv(save_csv, index=False)
 
     print(f"Saved : {save_csv}")
@@ -74,8 +74,8 @@ for noise in NOISES:
     )
 
     plt.xlabel("Noise rate")
-    plt.ylabel("Maximum fidelity")
-    plt.title(f"Protect ({noise})")
+    plt.ylabel("Teleportation fidelity")
+    plt.title(f"Fidelity of the teleported quantum state\n({noise})")
     plt.grid(True)
 
     plt.savefig(BASE_DIR / f"{noise}_max_fidelity.png", dpi=300)

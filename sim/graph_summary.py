@@ -13,11 +13,11 @@ BASE_DIR = Path("./plots_test")
 
 # プロトコル
 PROTOCOLS = {
-    "bennet": "Bennet fidelity_2.csv",
-    "deutsch": "Deutsch fidelity_2.csv",
-    "filter": "Filter fidelity_2.csv",
-    "protect": "Protect fidelity_2.csv",
-    "standard": "Teleportation fidelity_2.csv"
+    "bennet": "Bennet fidelity_1.csv",
+    "deutsch": "Deutsch fidelity_1.csv",
+    "filter": "Filter fidelity_1.csv",
+    "protect": "Protect max fidelity_1.csv",
+    "standard": "Teleportation fidelity_1.csv"
 }
 
 # ノイズ
@@ -38,7 +38,7 @@ def calc_statistics(df):
     """node_distanceごとの平均と標準誤差を計算"""
 
     return (
-        df.groupby("node_distance")["F2"]
+        df.groupby("node_distance")["fidelity"]
         .agg(mean="mean", sem="sem")
         .reset_index()
     )

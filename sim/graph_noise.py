@@ -9,7 +9,7 @@ matplotlib.use("Agg")
 # フォルダ設定
 # ============================================
 
-BENNET_DIR = Path("./plots_test/bennet/noise")
+FILTER_DIR = Path("./plots_test/filter/noise")
 STANDARD_DIR = Path("./plots_test/standard/noise")
 
 NOISES = [
@@ -28,8 +28,8 @@ for noise in NOISES:
     # CSV読み込み
     # -------------------------------
 
-    bennet = pd.read_csv(
-        BENNET_DIR / noise / "Bennet result_1.csv"
+    filter = pd.read_csv(
+        FILTER_DIR / noise / "optimal summary_1.csv"
     )
 
     standard = pd.read_csv(
@@ -41,8 +41,8 @@ for noise in NOISES:
     # -------------------------------
 
     if noise == "depolar":
-        bennet_data = (
-            bennet.groupby("depolar_rate")["fidelity"]
+        filter_data = (
+            filter.groupby("depolar_rate")["fidelity"]
                 .agg(fidelity="mean", sem="sem")
                 .reset_index()
         )
@@ -53,8 +53,8 @@ for noise in NOISES:
                     .reset_index()
         )
     else:
-        bennet_data = (
-            bennet.groupby("damp_rate")["fidelity"]
+        filter_data = (
+            filter.groupby("damp_rate")["fidelity"]
                 .agg(fidelity="mean", sem="sem")
                 .reset_index()
         )
@@ -73,12 +73,12 @@ for noise in NOISES:
 
     if noise == "depolar":
         plt.errorbar(
-            bennet_data["depolar_rate"],
-            bennet_data["fidelity"],
-            yerr=bennet_data["sem"],
+            filter_data["depolar_rate"],
+            filter_data["fidelity"],
+            yerr=filter_data["sem"],
             marker="o",
             capsize=3,
-            label="Bennet"
+            label="Filter"
         )
 
         plt.errorbar(
@@ -91,12 +91,12 @@ for noise in NOISES:
         )
     else:
         plt.errorbar(
-        bennet_data["damp_rate"],
-        bennet_data["fidelity"],
-        yerr=bennet_data["sem"],
-        marker="o",
-        capsize=3,
-        label="Bennet"
+            filter_data["damp_rate"],
+            filter_data["fidelity"],
+            yerr=filter_data["sem"],
+            marker="o",
+            capsize=3,
+            label="Filter"
         )
 
         plt.errorbar(
@@ -110,11 +110,11 @@ for noise in NOISES:
 
     plt.xlabel("Noise rate")
     plt.ylabel("Teleportation fidelity")
-    plt.title(f"{noise}")
+    plt.title(f"Fidelity of the teleported quantum state\n{noise}")
     plt.grid(True)
     plt.legend()
 
-    plt.savefig(f"./plots_test/bennet/noise/{noise}/{noise}_comparison.png", dpi=300)
+    plt.savefig(f"./plots_test/filter/noise/{noise}/{noise}_comparison.png", dpi=300)
     plt.close()
 
     print(f"Saved : {noise}_comparison.png")
