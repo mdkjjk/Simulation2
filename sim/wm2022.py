@@ -307,7 +307,7 @@ class RWMeasure(NodeProtocol):   # Bob側のプロトコル
 
         
 
-def network_setup(source_delay=1e5, source_fidelity_sq=0.8, damp_rate=500, node_distance=200):
+def network_setup(source_delay=1e5, source_fidelity_sq=0.8, damp_rate=1400, node_distance=200):
     network = Network("wmeasure_network")
 
     # ノード設定
@@ -434,7 +434,7 @@ def run_experiment(var_o, var_t):
             network = network_setup()
             node_a = network.get_node("node_A")
             node_b = network.get_node("node_B")
-            pro_example, dc = sim_setup(node_a, node_b, 5000, omega, theta)
+            pro_example, dc = sim_setup(node_a, node_b, 1000, omega, theta)
             pro_example.start()
             ns.sim_run()
             df = dc.dataframe
@@ -457,7 +457,7 @@ def save_heatmap(dataframe, value_col, title, colorbar_label, filename_prefix, v
     plt.xlabel(r'WM strength $\omega$')
     plt.ylabel(r'WMR strength $\theta$')
     plt.title(title)
-    save_dir = "./plots_test/protect/noise/500/amplitude"
+    save_dir = "./plots_test/protect/noise/1400/amplitude"
     count1 = len([f for f in os.listdir(save_dir) if f.startswith(filename_prefix)])
     filename = f"{save_dir}/{filename_prefix}_{count1 + 1}.png"
     plt.savefig(filename)
@@ -481,7 +481,7 @@ def create_plot():
     save_heatmap(
         datas,
         value_col="fidelity",
-        title="Fidelity Heatmap with protection\n(damp_rate=500 Hz, node_distance=200 km)",
+        title="Fidelity Heatmap with protection\n(damp_rate=1400 Hz, node_distance=200 km)",
         colorbar_label="Average Fidelity",
         filename_prefix="Protect fidelity",
         var_o=var_o,
@@ -491,7 +491,7 @@ def create_plot():
     save_heatmap(
         datas,
         value_col="probability",
-        title="Success Probability Heatmap with protection\n(damp_rate=500 Hz, node_distance=200 km)",
+        title="Success Probability Heatmap with protection\n(damp_rate=1400 Hz, node_distance=200 km)",
         colorbar_label="Average Success Probability",
         filename_prefix="Protect probability",
         var_o=var_o,
@@ -501,13 +501,13 @@ def create_plot():
     save_heatmap(
         datas,
         value_col="pairs",
-        title="Entanglement Pair Usage Heatmap with protection\n(damp_rate=500 Hz, node_distance=200 km)",
+        title="Entanglement Pair Usage Heatmap with protection\n(damp_rate=1400 Hz, node_distance=200 km)",
         colorbar_label="Average Number of Pairs",
         filename_prefix="Protect pairs",
         var_o=var_o,
         var_t=var_t
     )
-    save_dir = "./plots_test/protect/noise/500/amplitude"
+    save_dir = "./plots_test/protect/noise/1400/amplitude"
     count = len([f for f in os.listdir(save_dir) if f.startswith("Protect result")])
     datas.to_csv(f"{save_dir}/Protect result_{count + 1}.csv")
         
