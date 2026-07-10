@@ -9,7 +9,7 @@ matplotlib.use("Agg")
 # フォルダ設定
 # ============================================
 
-FILTER_DIR = Path("./plots_test/filter/noise")
+PROTECT_DIR = Path("./plots_test/protect/noise")
 STANDARD_DIR = Path("./plots_test/standard/noise")
 
 NOISES = [
@@ -28,8 +28,8 @@ for noise in NOISES:
     # CSV読み込み
     # -------------------------------
 
-    filter = pd.read_csv(
-        FILTER_DIR / noise / "optimal summary_1.csv"
+    protect = pd.read_csv(
+        PROTECT_DIR / noise / "Protect_summary.csv"
     )
 
     standard = pd.read_csv(
@@ -41,8 +41,8 @@ for noise in NOISES:
     # -------------------------------
 
     if noise == "depolar":
-        filter_data = (
-            filter.groupby("depolar_rate")["fidelity"]
+        protect_data = (
+            protect.groupby("depolar_rate")["fidelity"]
                 .agg(fidelity="mean", sem="sem")
                 .reset_index()
         )
@@ -53,8 +53,8 @@ for noise in NOISES:
                     .reset_index()
         )
     else:
-        filter_data = (
-            filter.groupby("damp_rate")["fidelity"]
+        protect_data = (
+            protect.groupby("damp_rate")["fidelity"]
                 .agg(fidelity="mean", sem="sem")
                 .reset_index()
         )
@@ -73,12 +73,12 @@ for noise in NOISES:
 
     if noise == "depolar":
         plt.errorbar(
-            filter_data["depolar_rate"],
-            filter_data["fidelity"],
-            yerr=filter_data["sem"],
+            protect_data["depolar_rate"],
+            protect_data["fidelity"],
+            yerr=protect_data["sem"],
             marker="o",
             capsize=3,
-            label="Filter"
+            label="Protect"
         )
 
         plt.errorbar(
@@ -91,12 +91,12 @@ for noise in NOISES:
         )
     else:
         plt.errorbar(
-            filter_data["damp_rate"],
-            filter_data["fidelity"],
-            yerr=filter_data["sem"],
+            protect_data["damp_rate"],
+            protect_data["fidelity"],
+            yerr=protect_data["sem"],
             marker="o",
             capsize=3,
-            label="Filter"
+            label="Protect"
         )
 
         plt.errorbar(
@@ -114,7 +114,7 @@ for noise in NOISES:
     plt.grid(True)
     plt.legend()
 
-    plt.savefig(f"./plots_test/filter/noise/{noise}/{noise}_comparison.png", dpi=300)
+    plt.savefig(f"./plots_test/protect/noise/{noise}/{noise}_comparison.png", dpi=300)
     plt.close()
 
     print(f"Saved : {noise}_comparison.png")

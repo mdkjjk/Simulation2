@@ -13,11 +13,11 @@ BASE_DIR = Path("./plots_test")
 
 # プロトコル
 PROTOCOLS = {
-    "bennet": "Bennet fidelity_1.csv",
-    "deutsch": "Deutsch fidelity_1.csv",
-    "filter": "Filter fidelity_1.csv",
-    "protect": "Protect max fidelity_1.csv",
-    "standard": "Teleportation fidelity_1.csv"
+    "bennet": "fidelity summary_1.csv",
+    "deutsch": "fidelity summary_1.csv",
+    "filter": "optimal summary_1.csv",
+    "protect": "Protect_summary.csv",
+    "standard": "Teleportation summary1.csv"
 }
 
 # ノイズ
@@ -28,7 +28,6 @@ NOISES = [
 ]
 
 SAVE_DIR = BASE_DIR / "comparison"
-SAVE_DIR.mkdir(exist_ok=True)
 
 # ==================================================
 # 関数
@@ -50,7 +49,7 @@ def load_csv(protocol, filename, noise):
     path = (
         BASE_DIR
         / protocol
-        / "node_distance"
+        / "noise"
         / noise
         / filename
     )
@@ -70,21 +69,28 @@ for noise in NOISES:
 
         df = load_csv(protocol, filename, noise)
 
-        data = calc_statistics(df)
+        if noise == "depolar":
+            plt.errorbar(
+                df["depolar_rate"],
+                df["fidelity"],
+                marker="o",
+                capsize=3,
+                linewidth=2,
+                label=protocol.capitalize()
+            )
+        else:
+            plt.errorbar(
+                df["damp_rate"],
+                df["fidelity"],
+                marker="o",
+                capsize=3,
+                linewidth=2,
+                label=protocol.capitalize()
+            )
 
-        plt.errorbar(
-            data["node_distance"],
-            data["mean"],
-            yerr=data["sem"],
-            marker="o",
-            capsize=3,
-            linewidth=2,
-            label=protocol.capitalize()
-        )
-
-    plt.xlabel("Node distance")
+    plt.xlabel("Noise rate")
     plt.ylabel("Teleportation fidelity")
-    plt.title(f"{noise}")
+    plt.title(f"Fidelity of the teleported quantum state\n{noise}")
     plt.grid(True)
     plt.legend()
 

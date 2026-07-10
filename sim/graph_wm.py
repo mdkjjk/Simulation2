@@ -5,9 +5,9 @@ from pathlib import Path
 
 matplotlib.use("Agg")
 
-# ========================================
+# ==================================================
 # 設定
-# ========================================
+# ==================================================
 
 BASE_DIR = Path("./plots_test/protect/noise")
 
@@ -19,11 +19,37 @@ NOISES = [
 
 NOISE_RATES = range(100, 1500, 100)
 
-# ========================================
-# ノイズごとに処理
-# ========================================
+CSV_NAME = "Protect result_1.csv"
 
-for noise in NOISES:
+
+# ==================================================
+# 関数
+# ==================================================
+
+def summarize_result(df):
+    """
+    omega, thetaごとに平均を計算
+    """
+
+    summary = (
+        df.groupby(["omega", "theta"])
+        .agg(
+            fidelity=("fidelity", "mean"),
+            pairs=("pairs", "mean"),
+            probability=("probability", "mean"),
+            time=("time", "mean"),
+        )
+        .reset_index()
+    )
+
+    return summary
+
+
+def get_best_result(noise):
+    """
+    各ノイズレートについて
+    fidelity最大となるデータを取得
+    """
 
     results = []
 
@@ -33,50 +59,125 @@ for noise in NOISES:
             BASE_DIR
             / str(rate)
             / noise
-            / "fidelity summary_1.csv"
+            / CSV_NAME
         )
 
         df = pd.read_csv(csv_path)
 
-        # fidelityが最大の行を取得
-        best_row = df.loc[df["fidelity"].idxmax()]
+        # omega, thetaごとに平均
+        summary = summarize_result(df)
 
-        # その行を辞書として保存
-        result = best_row.to_dict()
-        result["noise_rate"] = rate
+        # fidelity最大
+        best = summary.loc[summary["fidelity"].idxmax()].copy()
 
-        results.append(result)
+        if noise == "depolar":
+            best["depolar_rate"] = rate
+        else:
+            best["damp_rate"] = rate
 
-    # DataFrame化
+        results.append(best)
+
     result_df = pd.DataFrame(results)
 
-    # noise_rateを先頭列にする
-    cols = ["noise_rate"] + [c for c in result_df.columns if c != "noise_rate"]
-    result_df = result_df[cols]
+    if noise == "depolar":
+        columns = ["depolar_rate"] + [
+            c for c in result_df.columns
+            if c != "depolar_rate"
+        ]
+    else:
+        columns = ["damp_rate"] + [
+            c for c in result_df.columns
+            if c != "damp_rate"
+        ]
 
-    # CSV保存
-    save_csv = BASE_DIR / "Protect max fidelity.csv"
-    result_df.to_csv(save_csv, index=False)
+    return result_df[columns]
 
-    print(f"Saved : {save_csv}")
 
-    # -----------------------
-    # グラフ
-    # -----------------------
+def save_summary(df, noise):
+
+    save_path = BASE_DIR / f"{noise}/Protect_summary.csv"
+
+    df.to_csv(save_path, index=False)
+
+    print(f"Saved : {save_path}")
+
+
+def save_graph(df, y, ylabel, noise):
 
     plt.figure(figsize=(8,6))
 
-    plt.plot(
-        result_df["noise_rate"],
-        result_df["fidelity"],
-        marker="o",
-        linewidth=2
-    )
+    if noise == "depolar":
+        plt.plot(
+            df["depolar_rate"],
+            df[y],
+            marker="o",
+            linewidth=2
+        )
+    else:
+        plt.plot(
+            df["damp_rate"],
+            df[y],
+            marker="o",
+            linewidth=2
+        )
 
     plt.xlabel("Noise rate")
-    plt.ylabel("Teleportation fidelity")
-    plt.title(f"Fidelity of the teleported quantum state\n({noise})")
+    plt.ylabel(ylabel)
+    plt.title(f"{ylabel} ({df.name})")
     plt.grid(True)
 
-    plt.savefig(BASE_DIR / f"{noise}_max_fidelity.png", dpi=300)
+    save_path = BASE_DIR / f"{noise}/{df.name}_{y}.png"
+
+    plt.savefig(save_path, dpi=300)
     plt.close()
+
+    print(f"Saved : {save_path}")
+
+
+# ==================================================
+# メイン処理
+# ==================================================
+
+for noise in NOISES:
+
+    print(f"\n===== {noise.upper()} =====")
+
+    # 最大fidelityを取得
+    result = get_best_result(noise)
+
+    # 名前を保存（グラフ保存用）
+    result.name = noise
+
+    # CSV保存
+    save_summary(result, noise)
+
+    # グラフ保存
+    save_graph(
+        result,
+        "fidelity",
+        "Maximum Fidelity",
+        noise
+    )
+
+    save_graph(
+        result,
+        "pairs",
+        "Pairs",
+        noise
+    )
+
+    save_graph(
+        result,
+        "probability",
+        "Probability",
+        noise
+    )
+
+    save_graph(
+        result,
+        "time",
+        "Time [ns]",
+        noise
+    )
+
+print("\nFinished.")

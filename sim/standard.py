@@ -171,7 +171,7 @@ def create_plot_node(): #グラフ表示のための関数
     existing_files2 = len([f for f in os.listdir(save_dir) if f.startswith("Teleportation result")])
     fidelities.to_csv(f"{save_dir}/Teleportation result_{existing_files2 + 1}.csv")
     existing_files3 = len([f for f in os.listdir(save_dir) if f.startswith("Teleportation summary")])
-    data[['node_distance', 'fidelity']].to_csv(f"{save_dir}/Teleportation summary{existing_files2 + 1}.csv")
+    data[['node_distance', 'fidelity']].to_csv(f"{save_dir}/Teleportation summary_{existing_files2 + 1}.csv")
 
 def run_experiment_noise(noise_rate):   # シミュレーションを実行するための関数
     fidelity_data = pandas.DataFrame()
