@@ -183,7 +183,7 @@ class Bennet(NodeProtocol):
             return False
         return True
 
-def network_setup(source_delay=1e5, source_fidelity_sq=0.8, depolar_rate=100, node_distance=200):
+def network_setup(source_delay=1e5, source_fidelity_sq=0.8, damp_rate=500, node_distance=200):
     network = Network("bennet_network")
 
     # ノード設定
@@ -208,7 +208,7 @@ def network_setup(source_delay=1e5, source_fidelity_sq=0.8, depolar_rate=100, no
     # "quantum_noise_model": AmplitudeNoiseModel(gamma=damp_rate, time_independent=False)
     # "quantum_noise_model": PhaseNoiseModel(gamma=damp_rate, time_independent=False)
     qchannel = QuantumChannel("QChannel_A->B", length=node_distance,
-                              models={"quantum_noise_model": DepolarNoiseModel(depolar_rate=depolar_rate, time_independent=False),
+                              models={"quantum_noise_model": AmplitudeNoiseModel(gamma=damp_rate, time_independent=False),
                                       "delay_model": FibreDelayModel(c=200e3)})
     port_name_a, port_name_b = network.add_connection(
         node_a, node_b, channel_to=qchannel, label="quantum")
@@ -323,7 +323,7 @@ def save_plot(datas, column, title, prefix):
     }
     data = datas.groupby("node_distance")[column].agg(
         **{column:'mean', 'sem':'sem'}).reset_index()
-    save_dir = "./plots_test/bennet/node_distance/depolar"
+    save_dir = "./plots_test/bennet/node_distance/amplitude/500"
     count1 = len([f for f in os.listdir(save_dir)
                  if f.startswith(prefix)])
     filename = f"{save_dir}/{prefix}_{count1 + 1}.png"
@@ -347,22 +347,22 @@ def create_plot_node():
     save_plot(
         datas,
         column="fidelity",
-        title="Fidelity of the teleported quantum state with bennet\n(depolar_rate=100 Hz)",
+        title="Fidelity of the teleported quantum state with bennet\n(damp_rate=500 Hz)",
         prefix="Bennet fidelity"
     )
     save_plot(
         datas,
         column="probability",
-        title="Probability of success with bennet\n(depolar_rate=100 Hz)",
+        title="Probability of success with bennet\n(damp_rate=500 Hz)",
         prefix="Bennet probability"
     )
     save_plot(
         datas,
         column="pairs",
-        title="Number of entanglement pairs used with bennet\n(depolar_rate=100 Hz)",
+        title="Number of entanglement pairs used with bennet\n(damp_rate=500 Hz)",
         prefix="Bennet pairs"
     )
-    save_dir = "./plots_test/bennet/node_distance/depolar"
+    save_dir = "./plots_test/bennet/node_distance/amplitude/500"
     count = len([f for f in os.listdir(save_dir)
                  if f.startswith("Bennet result")])
     datas.to_csv(f"{save_dir}/Bennet result_{count + 1}.csv")

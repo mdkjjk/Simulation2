@@ -288,7 +288,7 @@ class FilteringExample(LocalProtocol):
             #print(f"Simulation {i}: Finish")
 
 
-def network_setup(source_delay=1e5, source_fidelity_sq=0.8, damp_rate=100,
+def network_setup(source_delay=1e5, source_fidelity_sq=0.8, damp_rate=500,
                           node_distance=200):
     network = Network("network")
 
@@ -320,7 +320,7 @@ def network_setup(source_delay=1e5, source_fidelity_sq=0.8, damp_rate=100,
     # "quantum_noise_model": AmplitudeNoiseModel(gamma=damp_rate, time_independent=False)
     # "quantum_noise_model": PhaseNoiseModel(gamma=damp_rate, time_independent=False)
     qchannel = QuantumChannel("QChannel_A->B", length=node_distance,
-                              models={"quantum_noise_model": PhaseNoiseModel(gamma=damp_rate, time_independent=False),
+                              models={"quantum_noise_model": AmplitudeNoiseModel(gamma=damp_rate, time_independent=False),
                                       "delay_model": FibreDelayModel(c=200e3)})
     port_name_a, port_name_b = network.add_connection(
         node_a, node_b, channel_to=qchannel, label="quantum", port_name_node1="qin_charlie", port_name_node2="qin_charlie")
@@ -399,7 +399,7 @@ def save_heatmap(dataframe, value_col, title, colorbar_label, filename_prefix, n
     plt.xlabel('node_distance')
     plt.ylabel(r'WM strength $\epsilon$')
     plt.title(title)
-    save_dir = "./plots_test/filter/node_distance/depolar"
+    save_dir = "./plots_test/filter/node_distance/amplitude/500"
     count1 = len([f for f in os.listdir(save_dir) if f.startswith(filename_prefix)])
     filename = f"{save_dir}/{filename_prefix}_{count1 + 1}.png"
     plt.savefig(filename)
@@ -431,7 +431,7 @@ def create_plot():
     save_heatmap(
         datas,
         value_col="fidelity",
-        title="Fidelity Heatmap with filtering\n(depolar_rate=100 Hz)",
+        title="Fidelity Heatmap with filtering\n(damp_rate=500 Hz)",
         colorbar_label="Average Fidelity",
         filename_prefix="Filter fidelity",
         node_distances=node_distances,
@@ -441,7 +441,7 @@ def create_plot():
     save_heatmap(
         datas,
         value_col="probability",
-        title="Success Probability Heatmap with filtering\n(depolar_rate=100 Hz)",
+        title="Success Probability Heatmap with filtering\n(damp_rate=500 Hz)",
         colorbar_label="Average Success Probability",
         filename_prefix="Filter probability",
         node_distances=node_distances,
@@ -451,13 +451,13 @@ def create_plot():
     save_heatmap(
         datas,
         value_col="pairs",
-        title="Entanglement Pair Usage Heatmap with filtering\n(depolar_rate=100 Hz)",
+        title="Entanglement Pair Usage Heatmap with filtering\n(damp_rate=500 Hz)",
         colorbar_label="Average Number of Pairs",
         filename_prefix="Filter pairs",
         node_distances=node_distances,
         variable=variable
     )
-    save_dir = "./plots_test/filter/node_distance/depolar"
+    save_dir = "./plots_test/filter/node_distance/amplitude/500"
     count = len([f for f in os.listdir(save_dir) if f.startswith("Filter result")])
     datas.to_csv(f"{save_dir}/Filter result_{count + 1}.csv")
 
@@ -562,4 +562,4 @@ if __name__ == "__main__":
     #print("Average fidelity of generated entanglement with filtering: {}".format(dc.dataframe["fidelity"].mean()))
     #print("Average resource with filtering: {}".format(dc.dataframe["pairs"].mean()))
     #print("Average probability of success with filtering: {}".format(dc.dataframe["probability"].mean()))
-    create_plot_noise()
+    create_plot()

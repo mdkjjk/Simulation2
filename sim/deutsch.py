@@ -263,7 +263,7 @@ class DistilExample(LocalProtocol):
             #print(f"Simulation {i}: Finish")
 
 
-def network_setup(source_delay=1e5, source_fidelity_sq=0.8, damp_rate=100,
+def network_setup(source_delay=1e5, source_fidelity_sq=0.8, damp_rate=500,
                           node_distance=200):
     network = Network("network")
 
@@ -294,7 +294,7 @@ def network_setup(source_delay=1e5, source_fidelity_sq=0.8, damp_rate=100,
     # "quantum_noise_model": AmplitudeNoiseModel(gamma=damp_rate, time_independent=False)
     # "quantum_noise_model": PhaseNoiseModel(gamma=damp_rate, time_independent=False)
     qchannel = QuantumChannel("QChannel_A->B", length=node_distance,
-                              models={"quantum_noise_model": PhaseNoiseModel(gamma=damp_rate, time_independent=False),
+                              models={"quantum_noise_model": AmplitudeNoiseModel(gamma=damp_rate, time_independent=False),
                                       "delay_model": FibreDelayModel(c=200e3)})
     port_name_a, port_name_b = network.add_connection(
         node_a, node_b, channel_to=qchannel, label="quantum", port_name_node1="qin_charlie", port_name_node2="qin_charlie")
@@ -355,7 +355,7 @@ def save_plot(datas, column, title, prefix):
     }
     data = datas.groupby("node_distance")[column].agg(
         **{column:'mean', 'sem':'sem'}).reset_index()
-    save_dir = "./plots_test/deutsch/node_distance/phase"
+    save_dir = "./plots_test/deutsch/node_distance/amplitude/500"
     count1 = len([f for f in os.listdir(save_dir)
                  if f.startswith(prefix)])
     filename = f"{save_dir}/{prefix}_{count1 + 1}.png"
@@ -379,22 +379,22 @@ def create_plot():
     save_plot(
         datas,
         column="fidelity",
-        title="Fidelity of the teleported quantum state with deutsch\n(depolar_rate=100 Hz)",
+        title="Fidelity of the teleported quantum state with deutsch\n(damp_rate=500 Hz)",
         prefix="Deutsch fidelity"
     )
     save_plot(
         datas,
         column="probability",
-        title="Probability of success with deutsch\n(depolar_rate=100 Hz)",
+        title="Probability of success with deutsch\n(damp_rate=500 Hz)",
         prefix="Deutsch probability"
     )
     save_plot(
         datas,
         column="pairs",
-        title="Number of entanglement pairs used with deutsch\n(depolar_rate=100 Hz)",
+        title="Number of entanglement pairs used with deutsch\n(damp_rate=500 Hz)",
         prefix="Deutsch pairs"
     )
-    save_dir = "./plots_test/deutsch/node_distance/phase"
+    save_dir = "./plots_test/deutsch/node_distance/amplitude/500"
     count = len([f for f in os.listdir(save_dir) if f.startswith("Deutsch result")])
     datas.to_csv(f"{save_dir}/Deutsch result_{count + 1}.csv")
 
@@ -473,4 +473,4 @@ if __name__ == "__main__":
     #print("Average fidelity of generated entanglement with distil: {}".format(dc.dataframe["fidelity"].mean()))
     #print("Average resource with protection: {}".format(dc.dataframe["pairs"].mean()))
     #print("Average probability of success with protection: {}".format(dc.dataframe["probability"].mean()))
-    create_plot_noise()
+    create_plot()
