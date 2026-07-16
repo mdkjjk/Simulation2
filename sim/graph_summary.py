@@ -20,6 +20,14 @@ PROTOCOLS = {
     "standard": "Teleportation summary_1.csv"
 }
 
+LABEL = {
+    "bennet": "Non-breeding",
+    "deutsch": "QPA",
+    "filter": "Filter",
+    "protect": "WMFR",
+    "standard": "Standard"
+}
+
 # ノイズ
 NOISES = [
     "amplitude",
@@ -86,7 +94,7 @@ for noise in NOISES:
                     marker="o",
                     capsize=3,
                     linewidth=2,
-                    label=protocol.capitalize()
+                    label=LABEL[protocol]
                 )
             else:
                 best_rows = data.loc[data.groupby("damp_rate")["fidelity"].idxmax()]
@@ -97,7 +105,7 @@ for noise in NOISES:
                     marker="o",
                     capsize=3,
                     linewidth=2,
-                    label=protocol.capitalize()
+                    label=LABEL[protocol]
                 )
             
         else:
@@ -108,7 +116,7 @@ for noise in NOISES:
                     marker="o",
                     capsize=3,
                     linewidth=2,
-                    label=protocol.capitalize()
+                    label=LABEL[protocol]
                 )
             else:
                 plt.errorbar(
@@ -117,7 +125,7 @@ for noise in NOISES:
                     marker="o",
                     capsize=3,
                     linewidth=2,
-                    label=protocol.capitalize()
+                    label=LABEL[protocol]
                 )
 
     plt.xlabel("Noise rate")
