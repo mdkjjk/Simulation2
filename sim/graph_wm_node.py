@@ -25,7 +25,7 @@ CSV_NAME = "Protect result_1.csv"
 # ノイズごとのサブフォルダ
 SUB_DIR = {
     "amplitude": "500",
-    "depolar": "500",
+    "depolar": "100",
     "phase": None
 }
 
@@ -122,8 +122,10 @@ def save_summary(df, noise):
     """
     最大値一覧をCSV保存
     """
-
-    save_path = BASE_DIR / f"{noise}/Protect_summary.csv"
+    if SUB_DIR[noise] is None:
+        save_path = BASE_DIR / f"{noise}/Protect_summary.csv"
+    else:
+        save_path = BASE_DIR / noise / SUB_DIR[noise] / "Protect_summary.csv"
 
     df.to_csv(save_path, index=False)
 
@@ -150,7 +152,10 @@ def save_graph(df, noise, y_column, ylabel):
 
     plt.grid(True)
 
-    save_path = BASE_DIR / f"{noise}/{noise}_{y_column}.png"
+    if SUB_DIR[noise] is None:
+        save_path = BASE_DIR / f"{noise}/{noise}_{y_column}.png"
+    else:
+        save_path = BASE_DIR / noise / SUB_DIR[noise] / f"{noise}_{y_column}.png"
 
     plt.savefig(save_path, dpi=300)
     plt.close()

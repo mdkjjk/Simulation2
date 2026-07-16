@@ -13,10 +13,11 @@ BASE_DIR = Path("./plots_test")
 
 # プロトコル
 PROTOCOLS = {
-    "bennet": "probability summary_1.csv",
-    "deutsch": "probability summary_1.csv",
-    "filter": "probability summary_1.csv",
-    "protect": "Protect_summary.csv"
+    "bennet": "fidelity summary_1.csv",
+    "deutsch": "fidelity summary_1.csv",
+    "filter": "fidelity summary_1.csv",
+    "protect": "Protect_summary.csv",
+    "standard": "Teleportation summary_1.csv"
 }
 
 # ノイズ
@@ -37,13 +38,13 @@ def calc_statistics(df, noise):
 
     if noise == "depolar":
         return (
-            df.groupby(["depolar_rate", "epsilon"])["probability"]
+            df.groupby(["depolar_rate", "epsilon"])["fidelity"]
             .mean()
             .reset_index()
         )
     else:
         return (
-            df.groupby(["damp_rate", "epsilon"])["probability"]
+            df.groupby(["damp_rate", "epsilon"])["fidelity"]
             .mean()
             .reset_index()
         )
@@ -77,22 +78,22 @@ for noise in NOISES:
         if protocol == "filter":
             data = calc_statistics(df, noise)
             if noise == "depolar":
-                best_rows = data.loc[data.groupby("depolar_rate")["probability"].idxmax()]
+                best_rows = data.loc[data.groupby("depolar_rate")["fidelity"].idxmax()]
                 best_rows = best_rows.sort_values("depolar_rate")
                 plt.errorbar(
                     best_rows["depolar_rate"],
-                    best_rows["probability"],
+                    best_rows["fidelity"],
                     marker="o",
                     capsize=3,
                     linewidth=2,
                     label=protocol.capitalize()
                 )
             else:
-                best_rows = data.loc[data.groupby("damp_rate")["probability"].idxmax()]
+                best_rows = data.loc[data.groupby("damp_rate")["fidelity"].idxmax()]
                 best_rows = best_rows.sort_values("damp_rate")
                 plt.errorbar(
                     best_rows["damp_rate"],
-                    best_rows["probability"],
+                    best_rows["fidelity"],
                     marker="o",
                     capsize=3,
                     linewidth=2,
@@ -103,7 +104,7 @@ for noise in NOISES:
             if noise == "depolar":
                 plt.errorbar(
                     df["depolar_rate"],
-                    df["probability"],
+                    df["fidelity"],
                     marker="o",
                     capsize=3,
                     linewidth=2,
@@ -112,7 +113,7 @@ for noise in NOISES:
             else:
                 plt.errorbar(
                     df["damp_rate"],
-                    df["probability"],
+                    df["fidelity"],
                     marker="o",
                     capsize=3,
                     linewidth=2,
@@ -120,12 +121,12 @@ for noise in NOISES:
                 )
 
     plt.xlabel("Noise rate")
-    plt.ylabel("Probability")
-    plt.title(f"Probability of success\n{noise}")
+    plt.ylabel("Fidelity")
+    plt.title(f"Fidelity of the teleported quantum state\n{noise}")
     plt.grid(True)
     plt.legend()
 
-    save_path = SAVE_DIR / f"noise/{noise}_probability.png"
+    save_path = SAVE_DIR / f"noise/{noise}/{noise}_fidelity.png"
 
     plt.savefig(save_path, dpi=300)
     plt.close()
