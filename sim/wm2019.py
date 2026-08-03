@@ -21,7 +21,7 @@ from netsquid.nodes.node import Node
 from netsquid.nodes.network import Network
 from netsquid.nodes.connections import DirectConnection
 from netsquid.components import ClassicalChannel, QuantumChannel
-from netsquid.components.instructions import INSTR_MEASURE, INSTR_CNOT, INSTR_H, INSTR_INIT, IGate
+from netsquid.components.instructions import INSTR_MEASURE, INSTR_CNOT, INSTR_H, INSTR_S, INSTR_INIT, IGate
 from netsquid.components.component import Message, Port
 from netsquid.components.qsource import QSource, SourceStatus
 from netsquid.components.qprocessor import QuantumProcessor
@@ -59,6 +59,7 @@ class Prepare(NodeProtocol):
         q1, = prog.get_qubit_indices(1)
         prog.apply(INSTR_INIT, [q1])
         prog.apply(INSTR_H, [q1])
+        prog.apply(INSTR_S, [q1])
         return prog
 
     def run(self):
@@ -172,14 +173,14 @@ class WMeasure(NodeProtocol):
             yield self.await_program(self.node.qmemory)
         yield self.node.qmemory.execute_program(self._rotation_program(mresult, rot_axis), self._qmem_positions)
 
-def network_setup(source_delay=1e5, source_fidelity_sq=0.9, damp_rate=100, node_distance=300):
+def network_setup(source_delay=1e5, source_fidelity_sq=0.8, damp_rate=100, node_distance=10):
     network = Network("wmeasure_network")
 
     # ノード設定
     node_a, node_b = network.add_nodes(["node_A", "node_B"])
-    node_a.add_subcomponent(QuantumProcessor("QuantumMemory_A", num_positions=11,
+    node_a.add_subcomponent(QuantumProcessor("QuantumMemory_A", num_positions=6,
         fallback_to_nonphysical=True))   # パラメータ「memory_noise_models」によりメモリ滞在によるノイズの影響を設定可能
-    node_b.add_subcomponent(QuantumProcessor("QuantumMemory_B", num_positions=11,
+    node_b.add_subcomponent(QuantumProcessor("QuantumMemory_B", num_positions=6,
         fallback_to_nonphysical=True))   # パラメータ「memory_noise_models」によりメモリ滞在によるノイズの影響を設定可能
 
     # チャネル設定
@@ -258,7 +259,7 @@ def run_experiment(var_t, var_e):
             network = network_setup()
             node_a = network.get_node("node_A")
             node_b = network.get_node("node_B")
-            wm_example, dc = sim_setup(node_a, node_b, 100, theta, eta)
+            wm_example, dc = sim_setup(node_a, node_b, 1000, theta, eta)
             wm_example.start()
             ns.sim_run()
             df = dc.dataframe
@@ -269,8 +270,8 @@ def run_experiment(var_t, var_e):
 
 def create_plot():
     matplotlib.use('Agg')
-    var_t = [i for i in np.arange(0.0, np.pi/2, np.pi/12)]
-    var_e = [i for i in np.arange(0.0, np.pi, np.pi/12)]
+    var_t = [i for i in np.arange(0.0, np.pi/2, np.pi/16)]
+    var_e = [i for i in np.arange(0.0, np.pi, np.pi/10)]
     fidelities = run_experiment(var_t, var_e)
     data = fidelities.groupby(["theta", "eta"])['fidelity'].mean().reset_index()
     heatmap_data = data.pivot(index='eta', columns='theta', values='fidelity')
@@ -282,8 +283,8 @@ def create_plot():
     plt.xlabel(r'Measurement strength $\theta$')
     plt.ylabel(r'Rotation angle $\eta$')
     # タイトル
-    plt.title("Fidelity Heatmap with weak measurement\n(damp_rate=100, node_distance=300)")
-    save_dir = "./plots_test/wm"
+    plt.title("Fidelity Heatmap with weak measurement\n(damp_rate=100, node_distance=10)")
+    save_dir = "./plots_test/wm/node_distance/10/phase"
     existing_files1 = len([f for f in os.listdir(save_dir) if f.startswith("WM fidelity")])
     filename = f"{save_dir}/WM fidelity_{existing_files1 + 1}.png"
     plt.savefig(filename)

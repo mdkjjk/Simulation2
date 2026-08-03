@@ -145,10 +145,10 @@ class Bennet(NodeProtocol):
         pos1, pos2 = self._qmem_positions
         if self.node.qmemory.busy:
             yield self.await_program(self.node.qmemory)
-        if self.role.upper() == "A": # Aliceの場合、回転操作を行う
+        if self.role.upper() == "A":   # Aliceの場合、回転操作を行う
             yield self.node.qmemory.execute_program(self._rotprog, [pos1, pos2])
-        yield self.node.qmemory.execute_program(self._measprog, [pos1, pos2]) # 測定
-        if self.role.upper() == "A": # Aliceの場合、回転操作を行う
+        yield self.node.qmemory.execute_program(self._measprog, [pos1, pos2])   # 測定
+        if self.role.upper() == "A":   # Aliceの場合、回転操作を行う
             yield self.node.qmemory.execute_program(self._reprog, [pos2])
         self.local_meas_result = self._measprog.output["M"][0]
         self._qmem_positions[0] = None
@@ -248,6 +248,7 @@ class BennetExample(LocalProtocol):
         self.subprotocols["bennet_B"].start_expression = (
             self.subprotocols["bennet_B"].await_signal(self.subprotocols["entangle_B"],
                                                        Signals.SUCCESS))
+        # テレポーテーションプロトコルの開始条件
         self.subprotocols["teleport_A"].start_expression = self.subprotocols["teleport_A"].await_signal(
                                                             self.subprotocols["bennet_A"], Signals.SUCCESS)
         self.subprotocols["teleport_B"].start_expression = self.subprotocols["teleport_B"].await_signal(
@@ -262,7 +263,8 @@ class BennetExample(LocalProtocol):
             self.send_signal(Signals.WAITING)
             # 各ノードでのテレポーテーション処理が完了するまで待機
             yield (self.await_signal(self.subprotocols["teleport_A"], Signals.SUCCESS) &
-                   self.await_signal(self.subprotocols["teleport_B"], Signals.SUCCESS)) 
+                   self.await_signal(self.subprotocols["teleport_B"], Signals.SUCCESS))
+            # 結果の取得
             signal_A = self.subprotocols["bennet_A"].get_signal_result(Signals.SUCCESS, self)
             result_en = {
                 "pairs": self.subprotocols["entangle_A"].entangled_pairs,
@@ -291,7 +293,7 @@ def sim_setup(node_a, node_b, num_runs):
         q_B, = node_b.qmemory.pop(positions=[result_tel["pos_B"]])
         #print(qapi.reduced_dm([q_A, q_B]))
         f2 = qapi.fidelity(q_B, ks.y0, squared=True)   # 忠実度を求める
-        prob = 1 / result_en["runs"]
+        prob = 1 / result_en["runs"]   # 成功確率を求める
         return {"fidelity": f2, "pairs": result_en["pairs"], "probability": prob, "time": result_tel["time"]}
 
     dc = DataCollector(record_run, include_time_stamp=False,
@@ -300,7 +302,7 @@ def sim_setup(node_a, node_b, num_runs):
                                      event_type=Signals.SUCCESS.value))
     return be_example, dc
 
-def run_experiment(node_distances):
+def run_experiment(node_distances):   # ノード間距離をパラメータとしてシミュレーション
     fidelity_data = pandas.DataFrame()
     for node_distance in node_distances:
         ns.sim_reset()
@@ -315,7 +317,7 @@ def run_experiment(node_distances):
         fidelity_data = pandas.concat([fidelity_data, df])
     return fidelity_data
 
-def save_plot(datas, column, title, prefix):
+def save_plot(datas, column, title, prefix):   # 各指標の結果をグラフ化
     plot_style = {
         'kind': 'scatter',
         'grid': True,
@@ -340,7 +342,7 @@ def save_plot(datas, column, title, prefix):
                 if f.startswith(column + " summary")])
     data[['node_distance', column]].to_csv(f"{save_dir}/{column} summary_{count2 + 1}.csv")
 
-def create_plot_node():
+def create_plot_node():   # グラフのプロット
     matplotlib.use('Agg')
     node_distances = [i for i in range(10, 1000, 50)]
     datas = run_experiment(node_distances)
@@ -367,7 +369,7 @@ def create_plot_node():
                  if f.startswith("Bennet result")])
     datas.to_csv(f"{save_dir}/Bennet result_{count + 1}.csv")
 
-def run_experiment_noise(noise_rate):
+def run_experiment_noise(noise_rate):   # ノイズ減衰率をパラメータとしてシミュレーション
     fidelity_data = pandas.DataFrame()
     for noise in noise_rate:
         ns.sim_reset()
@@ -382,7 +384,7 @@ def run_experiment_noise(noise_rate):
         fidelity_data = pandas.concat([fidelity_data, df])
     return fidelity_data
 
-def save_plot_noise(datas, column, title, prefix):
+def save_plot_noise(datas, column, title, prefix):   # 各指標の結果をグラフ化
     plot_style = {
         'kind': 'scatter',
         'grid': True,
@@ -407,7 +409,7 @@ def save_plot_noise(datas, column, title, prefix):
                 if f.startswith(column + " summary")])
     data[['depolar_rate', column]].to_csv(f"{save_dir}/{column} summary_{count2 + 1}.csv")
 
-def create_plot_noise():
+def create_plot_noise():   # グラフのプロット
     matplotlib.use('Agg')
     noise_rate = [i for i in range(0, 1500, 100)]
     datas = run_experiment_noise(noise_rate)
