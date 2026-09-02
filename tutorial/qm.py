@@ -28,7 +28,7 @@ from netsquid.nodes.connections import DirectConnection
 from netsquid.examples.entanglenodes import EntangleNodes
 from pydynaa import EventExpression
 from netsquid.components import QuantumMemory
-from netsquid.qubits.qubitapi import create_qubits
+from netsquid.qubits.qubitapi import create_qubits, assign_qstate
 
 depolar_noise = DepolarNoiseModel(depolar_rate=1e6)
 qmem = QuantumMemory("DepolarMemory", num_positions=2,
@@ -46,3 +46,17 @@ for i in range(0, 2, 1):
 #print(qmem.pop(positions=[0,1]))
 print(qmem.peek(0))
 print(qmem.peek(1))
+
+q = create_qubits(1, no_state=True)
+state = np.array([[0.5, -0.5j], [0.5j, 0.5]])
+rho =np.array([[0,0], [0,1]])
+
+qapi.assign_qstate(q, rho)
+
+print(np.trace(rho @ state))
+print(qapi.fidelity(q, state, squared=True))
+
+from netsquid.qubits.dmtools import DenseDMRepr
+import inspect
+
+help(DenseDMRepr.fidelity)

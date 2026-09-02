@@ -3,11 +3,8 @@ import netsquid as ns
 import pydynaa as pd
 import pandas
 import matplotlib, os
-import math
 from matplotlib import pyplot as plt
-import noise
 from noise import AmplitudeNoiseModel, PhaseNoiseModel
-import teleportation
 from teleportation import InitStateProgram, BellMeasurement, Correction
 
 from netsquid.qubits import operators as ops
@@ -207,8 +204,8 @@ class Protect(NodeProtocol):   # Alice側のプロトコル
 class RWMeasure(NodeProtocol):   # Bob側のプロトコル
     def __init__(self, node, port_c, port_q, start_expression=None, msg_header="protect", theta=0.2, name=None):
         if not isinstance(port_c, Port) or not isinstance(port_q, Port):
-            raise ValueError("{} is not a Port".format(port))
-        name = name if name else "RWMeasureNode({}, {})".format(node.name, port.name)
+            raise ValueError("{} is not a Port".format(Port))
+        name = name if name else "RWMeasureNode({}, {})".format(node.name, Port.name)
         super().__init__(node, name=name)
         self.port_c = port_c
         self.port_q = port_q

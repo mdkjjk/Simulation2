@@ -241,6 +241,7 @@ def sim_setup(node_a, node_b, num_runs, theta, eta):
         result = protocol.get_signal_result(Signals.SUCCESS)
         #print(result)
         ideal_state = result["ideal_state"]
+        print(ideal_state)
         q, = node_b.qmemory.pop(positions=[result["pos_B"]])
         f2 = qapi.fidelity(q, ideal_state, squared=True)
         return {"fidelity": f2, "time": result["time"]}
