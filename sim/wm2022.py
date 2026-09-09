@@ -353,9 +353,9 @@ class ProtectExample(LocalProtocol):
         self.add_subprotocol(LocalEntangle(node=node_a, qsource_name="QSource_A", input_mem_pos0=0,
                                            input_mem_pos1=1, num_pairs=1, name="entangle_A"))
         # 保護処理プロトコル
-        self.add_subprotocol(Protect(node_a, node_a.ports["cout_bob"], omega=np.pi/3, name="protect_A"))
+        self.add_subprotocol(Protect(node_a, node_a.ports["cout_bob"], omega=omega, name="protect_A"))
         self.add_subprotocol(RWMeasure(node_b, node_b.ports["cin_alice"],
-                             node_b.ports["qin_alice"], theta=0.2, name="rwmeasure_B"))
+                             node_b.ports["qin_alice"], theta=theta, name="rwmeasure_B"))
         # テレポーテーションプロトコル
         self.add_subprotocol(BellMeasurement(node=node_a, port=node_a.ports["cout_bob"], name="teleport_A"))
         self.add_subprotocol(Correction(node=node_b, name="teleport_B"))

@@ -5,9 +5,7 @@ import pydynaa as pd
 import pandas
 import matplotlib, os
 from matplotlib import pyplot as plt
-import noise
 from noise import AmplitudeNoiseModel, PhaseNoiseModel
-import teleportation
 from teleportation import InitStateProgram, BellMeasurement, Correction
 
 import netsquid.components.instructions as instr
@@ -25,6 +23,7 @@ from netsquid.qubits import operators as ops
 from netsquid.qubits import qubitapi as qapi
 from netsquid.qubits import ketstates as ks
 from netsquid.qubits.state_sampler import StateSampler
+from netsquid.qubits.qformalism import QFormalism
 from netsquid.protocols.nodeprotocols import NodeProtocol, LocalProtocol
 from netsquid.protocols.protocol import Signals
 from netsquid.nodes.node import Node
@@ -33,6 +32,7 @@ from netsquid.nodes.connections import DirectConnection
 from netsquid.examples.entanglenodes import EntangleNodes
 from pydynaa import EventExpression
 
+ns.set_qstate_formalism(QFormalism.DM)
 
 class Distil(NodeProtocol):
     """Protocol that does local DEJMPS distillation on a node.
