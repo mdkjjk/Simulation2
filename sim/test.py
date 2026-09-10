@@ -19,7 +19,7 @@ from netsquid.nodes.node import Node
 from netsquid.nodes.network import Network
 from netsquid.nodes.connections import DirectConnection
 from netsquid.components import ClassicalChannel, QuantumChannel
-from netsquid.components.instructions import INSTR_MEASURE, INSTR_CNOT, INSTR_X
+from netsquid.components.instructions import INSTR_MEASURE, INSTR_CNOT, INSTR_X, INSTR_SWAP
 from netsquid.components.component import Message, Port
 from netsquid.components.qsource import QSource, SourceStatus
 from netsquid.components.qprocessor import QuantumProcessor
@@ -39,7 +39,7 @@ ns.set_qstate_formalism(QFormalism.DM)
 
 class LocalEntangle(NodeProtocol):
     def __init__(self, node, qsource_name, start_expression=None, 
-                 input_mem_pos0=0, input_mem_pos1=1, num_pairs=2, name=None):
+                 input_mem_pos0=0, input_mem_pos1=1, num_pairs=1, name=None):
         name = name if name else f"LocalEntangle({node.name})"
         super().__init__(node=node, name=name)
         if start_expression is not None and not isinstance(start_expression, EventExpression):
@@ -66,7 +66,7 @@ class LocalEntangle(NodeProtocol):
         self.entangled_pairs = 0  # counter
         self._mem_positions = [self._mem_pos0, self._mem_pos1]
         # Claim extra memory positions to use (if any):
-        extra_memory = self._num_pairs - 1
+        extra_memory = self._num_pairs * 2 - 2
         if extra_memory > 0:
             unused_positions = self.node.qmemory.unused_positions
             if extra_memory > len(unused_positions):
@@ -93,14 +93,26 @@ class LocalEntangle(NodeProtocol):
                 yield self.start_expression
             elif self.entangled_pairs >= self._num_pairs:
                 break
-            self.node.subcomponents[self._qsource_name].trigger()
-            yield (self.await_port_input(self._qin0) | self.await_port_input(self._qin1))
-            print("Entanglement Pair")
-            print(qapi.reduced_dm(self.node.qmemory.peek([self._mem_pos0, self._mem_pos1])))
-            self.entangled_pairs += 1
-            result = {"mem_pos0": self._mem_pos0,
-                      "mem_pos1": self._mem_pos1,}
-            self.send_signal(Signals.SUCCESS, result)
+            mem_positions = self._mem_positions[::-1]
+            for i in range(0, len(mem_positions), 2):
+                mem_pos0 = mem_positions[i + 1]
+                mem_pos1 = mem_positions[i]
+                self.node.subcomponents[self._qsource_name].trigger()
+                yield (self.await_port_input(self._qin0) & self.await_port_input(self._qin1))
+                if mem_pos0 != self._mem_pos0:
+                    self.node.qmemory.execute_instruction(INSTR_SWAP, [self._mem_pos0, mem_pos0])
+                    if self.node.qmemory.busy:
+                        yield self.await_program(self.node.qmemory)
+                if mem_pos1 != self._mem_pos1:
+                    self.node.qmemory.execute_instruction(INSTR_SWAP, [self._mem_pos1, mem_pos1])
+                    if self.node.qmemory.busy:
+                        yield self.await_program(self.node.qmemory)
+                print("Entanglement Pair")
+                print(qapi.reduced_dm(self.node.qmemory.peek([mem_pos0, mem_pos1])))
+                self.entangled_pairs += 1
+                result = {"mem_pos0": mem_pos0,
+                        "mem_pos1": mem_pos1,}
+                self.send_signal(Signals.SUCCESS, result)
 
 def network_setup(source_delay=1e5, source_fidelity_sq=0.8, depolar_rate=100, node_distance=10):
     network = Network("wmeasure_network")
