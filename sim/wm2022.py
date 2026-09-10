@@ -95,6 +95,7 @@ class LocalEntangle(NodeProtocol):
                 break
             self.node.subcomponents[self._qsource_name].trigger()
             yield (self.await_port_input(self._qin0) | self.await_port_input(self._qin1))
+            print(qapi.reduced_dm(self.node.qmemory.peek([self._mem_pos0, self._mem_pos1])))
             self.entangled_pairs += 1
             result = {"mem_pos0": self._mem_pos0,
                       "mem_pos1": self._mem_pos1,}
@@ -351,7 +352,7 @@ class ProtectExample(LocalProtocol):
         self.num_runs = num_runs
         # エンタングルメント生成プロトコル
         self.add_subprotocol(LocalEntangle(node=node_a, qsource_name="QSource_A", input_mem_pos0=0,
-                                           input_mem_pos1=1, num_pairs=1, name="entangle_A"))
+                                           input_mem_pos1=1, num_pairs=2, name="entangle_A"))
         # 保護処理プロトコル
         self.add_subprotocol(Protect(node_a, node_a.ports["cout_bob"], omega=omega, name="protect_A"))
         self.add_subprotocol(RWMeasure(node_b, node_b.ports["cin_alice"],
@@ -509,11 +510,11 @@ def create_plot():
     datas.to_csv(f"{save_dir}/Protect result_{count + 1}.csv")
         
 if __name__ == "__main__":
-    #network = network_setup()
-    #pro_example, dc = sim_setup(network.get_node("node_A"), network.get_node("node_B"), 1, np.pi/3, 0.2)
-    #pro_example.start()
-    #ns.sim_run()
-    #print("Average fidelity of generated entanglement with protection: {}".format(dc.dataframe["fidelity"].mean()))
-    #print("Average resource with protection: {}".format(dc.dataframe["pairs"].mean()))
-    #print("Average probability of success with protection: {}".format(dc.dataframe["probability"].mean()))
-    create_plot()
+    network = network_setup()
+    pro_example, dc = sim_setup(network.get_node("node_A"), network.get_node("node_B"), 1, np.pi/3, 0.2)
+    pro_example.start()
+    ns.sim_run()
+    print("Average fidelity of generated entanglement with protection: {}".format(dc.dataframe["fidelity"].mean()))
+    print("Average resource with protection: {}".format(dc.dataframe["pairs"].mean()))
+    print("Average probability of success with protection: {}".format(dc.dataframe["probability"].mean()))
+    #create_plot()
