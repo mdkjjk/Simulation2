@@ -11,10 +11,10 @@ ns.set_qstate_formalism(QFormalism.DM)
 def create_bell_state():
     qA, qB = create_qubits(2)
     assign_qstate(qA, ketstates.s0)  # |0⟩
-    assign_qstate(qB, ketstates.s1)  # |1⟩
+    assign_qstate(qB, ketstates.s0)  # |1⟩
     operate(qA, ns.H)                # Hadamard on qA
     operate([qA, qB], ns.CX)         # CNOT
-    operate(qA, ns.Z)                # To get |Ψ⁻⟩ from |Ψ⁺⟩
+    #operate(qA, ns.Z)                # To get |Ψ⁻⟩ from |Ψ⁺⟩
     return qA, qB
 
 # Werner状態の作成
@@ -26,14 +26,14 @@ def create_werner_state(fidelity):
     return qA, qB
 
 # Werner状態のペアを２つ用意
-qA, qB = create_werner_state(fidelity=0.9)
-qC, qD = create_werner_state(fidelity=0.9)
+qA, qB = create_werner_state(fidelity=0.95)
+qC, qD = create_werner_state(fidelity=0.95)
 print(qubitapi.reduced_dm([qC, qD]))
-print(fidelity([qC, qD], ketstates.b11))    # 初期忠実度
+print(fidelity([qC, qD], ketstates.b00))    # 初期忠実度
 
 # Aliceサイドで、σ_y回転ゲートを各ペアに適用 => |Φ⁺⟩が主成分になる
-operate(qA, ns.Y)
-operate(qC, ns.Y)
+#operate(qA, ns.Y)
+#operate(qC, ns.Y)
 
 # 各サイドで、CNOTゲートを適用
 operate([qC, qA], ns.CX)
@@ -43,9 +43,9 @@ ma = measure(qA, discard=True)
 mb = measure(qB, discard=True)
 
 if(ma[0] == mb[0]):  # 測定結果が一致する場合
-    operate(qC, ns.Y)                         # Aliceサイドで、σ_y回転ゲートを制御ビットに適用 => 主成分を|Ψ⁻⟩(Werner状態)に戻す
+    #operate(qC, ns.Y)                         # Aliceサイドで、σ_y回転ゲートを制御ビットに適用 => 主成分を|Ψ⁻⟩(Werner状態)に戻す
     print(qubitapi.reduced_dm([qC, qD]))
-    print(fidelity([qC, qD], ketstates.b11))  # 精製後の忠実度(>初期忠実度)
+    print(fidelity([qC, qD], ketstates.b00))  # 精製後の忠実度(>初期忠実度)
 else:                # 測定結果が不一致の場合
     print("not match")
     # 両サイドの制御ビットを破棄
