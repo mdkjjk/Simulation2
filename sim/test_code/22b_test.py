@@ -60,36 +60,39 @@ wmr_ops1 = [N1, N1_]
 def protect(qa, qb, meas_ops, wmr_ops0, wmr_ops1):
     # 弱測定
     mresult = gmeasure(qb, meas_operators=meas_ops)
-    #print(mresult)
+    print("weak measurement result =", mresult[0])
     #print(ns.qubits.reduced_dm([qa, qb]))
     # フリップ操作
     if (mresult[0] == 1):
         operate(qb, ns.X)
     #print(ns.qubits.reduced_dm([qa, qb]))
     # 振幅減衰
-    amplitude_dampen(qb, gamma=0.2, prob=1)
+    amplitude_dampen(qb, gamma=0.4, prob=1)
     #print(ns.qubits.reduced_dm([qa, qb]))
     # ポストフリップ操作
     if (mresult[0] == 1):
         operate(qb, ns.X)
         mrresult = gmeasure(qb, meas_operators=wmr_ops1)
-        #print(mrresult)
+        print("WMR result              =", mrresult[0])
         if (mrresult[0] == 1):
             #print("FAIL")
             result = 0
         else:
             #print("SUCCESS")
             result = 1
+            print("after protect:")
+            print(ns.qubits.reduced_dm([qa, qb]))
     else:   # 逆弱測定
         mrresult = gmeasure(qb, meas_operators=wmr_ops0)
-        #print(mrresult)
+        print("WMR result              =", mrresult[0])
         if (mrresult[0] == 1):
             #print("FAIL")
             result = 0
         else:
             #print("SUCCESS")
             result = 1
-    #print(ns.qubits.reduced_dm([qa, qb]))
+            print("after protect:")
+            print(ns.qubits.reduced_dm([qa, qb]))
     return result
 
 # 1組目
@@ -114,20 +117,64 @@ while pair_2 != 1:
 
 #print(pair_1, pair_2)
 
-print(ns.qubits.reduced_dm([qa1, qb1]))
-#print(ns.qubits.reduced_dm([qa2, qb2]))
-print(fidelity([qa1, qb1], ketstates.b00))
+# 精製前
+rho1 = ns.qubits.reduced_dm([qa1, qb1])
+rho2 = ns.qubits.reduced_dm([qa2, qb2])
 
-# 各サイドで、CNOTゲートを適用
+print("===== BEFORE PURIFICATION =====")
+
+print("Pair 1:")
+print(rho1)
+print("F1 =", fidelity([qa1, qb1], ketstates.b00))
+
+print()
+
+print("Pair 2:")
+print(rho2)
+print("F2 =", fidelity([qa2, qb2], ketstates.b00))
+
+print()
+
+print("rho1 == rho2 :", np.allclose(rho1, rho2))
+
+# BXOR
 operate([qa1, qa2], ns.CX)
 operate([qb1, qb2], ns.CX)
-# 各サイドで、ターゲットビットをZ軸で測定
-ma = measure(qa2, discard=True)
-mb = measure(qb2, discard=True)
 
-if(ma[0] == mb[0]):  # 測定結果が一致する場合
-    print("SUCCESS")
-    print(qubitapi.reduced_dm([qa1, qb1]))
-    print(fidelity([qa1, qb1], ketstates.b00))  # 精製後の忠実度(>初期忠実度)
-else:                # 測定結果が不一致の場合
-    print("not match")
+# ターゲット測定
+ma = measure(qa2, discard=True)
+print("Alice measurement =", ma[0])
+
+mb = measure(qb2, discard=True)
+print("Bob measurement   =", mb[0])
+
+# 精製後
+rho_out = ns.qubits.reduced_dm([qa1, qb1])
+
+print()
+print("===== AFTER PURIFICATION =====")
+print(rho_out)
+print("F =", fidelity([qa1, qb1], ketstates.b00))
+
+if ma[0] == mb[0]:
+    print("SUCCESS", ma[0], mb[0])
+else:
+    print("FAIL", ma[0], mb[0])
+
+q1, q2 = create_qubits(2)
+assign_qstate([q1, q2], b00)
+amplitude_dampen(q2, gamma=0.4, prob=1)
+print(ns.qubits.reduced_dm([q1, q2]))
+print("Standard F=", fidelity([q1, q2], b00))
+
+q, = create_qubits(1)
+assign_qstate(q, y0)
+tresult = tele_alice(q, qa1)
+qout = tele_bob(tresult[0][0], tresult[1][0], qb1)
+print("Teleportation F =", fidelity(qout, y0))
+
+qt, = create_qubits(1)
+assign_qstate(qt, y0)
+ttresult = tele_alice(qt, q1)
+qtout = tele_bob(ttresult[0][0], ttresult[1][0], q2)
+print("Standard teleportation F =",fidelity(qtout, y0))
