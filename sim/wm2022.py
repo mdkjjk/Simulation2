@@ -19,7 +19,7 @@ from netsquid.nodes.node import Node
 from netsquid.nodes.network import Network
 from netsquid.nodes.connections import DirectConnection
 from netsquid.components import ClassicalChannel, QuantumChannel
-from netsquid.components.instructions import INSTR_MEASURE, INSTR_CNOT, INSTR_X
+from netsquid.components.instructions import INSTR_MEASURE, INSTR_SWAP, INSTR_X
 from netsquid.components.component import Message, Port
 from netsquid.components.qsource import QSource, SourceStatus
 from netsquid.components.qprocessor import QuantumProcessor
@@ -66,7 +66,7 @@ class LocalEntangle(NodeProtocol):
         self.entangled_pairs = 0  # counter
         self._mem_positions = [self._mem_pos0, self._mem_pos1]
         # Claim extra memory positions to use (if any):
-        extra_memory = self._num_pairs - 1
+        extra_memory = self._num_pairs * 2 - 2
         if extra_memory > 0:
             unused_positions = self.node.qmemory.unused_positions
             if extra_memory > len(unused_positions):
@@ -93,12 +93,26 @@ class LocalEntangle(NodeProtocol):
                 yield self.start_expression
             elif self.entangled_pairs >= self._num_pairs:
                 break
-            self.node.subcomponents[self._qsource_name].trigger()
-            yield (self.await_port_input(self._qin0) | self.await_port_input(self._qin1))
-            self.entangled_pairs += 1
-            result = {"mem_pos0": self._mem_pos0,
-                      "mem_pos1": self._mem_pos1,}
-            self.send_signal(Signals.SUCCESS, result)
+            mem_positions = self._mem_positions[::-1]
+            for i in range(0, len(mem_positions), 2):
+                mem_pos0 = mem_positions[i + 1]
+                mem_pos1 = mem_positions[i]
+                self.node.subcomponents[self._qsource_name].trigger()
+                yield (self.await_port_input(self._qin0) & self.await_port_input(self._qin1))
+                if mem_pos0 != self._mem_pos0:
+                    self.node.qmemory.execute_instruction(INSTR_SWAP, [self._mem_pos0, mem_pos0])
+                    if self.node.qmemory.busy:
+                        yield self.await_program(self.node.qmemory)
+                if mem_pos1 != self._mem_pos1:
+                    self.node.qmemory.execute_instruction(INSTR_SWAP, [self._mem_pos1, mem_pos1])
+                    if self.node.qmemory.busy:
+                        yield self.await_program(self.node.qmemory)
+                #print(f"{self.name}:Entanglement Pair")
+                #print(qapi.reduced_dm(self.node.qmemory.peek([mem_pos0, mem_pos1])))
+                self.entangled_pairs += 1
+                result = {"mem_pos0": mem_pos0,
+                        "mem_pos1": mem_pos1,}
+                self.send_signal(Signals.SUCCESS, result)
 
 class Protect(NodeProtocol):   # Alice側のプロトコル
     def __init__(self, node, port, start_expression=None, msg_header="protect", omega=np.pi/3, name=None):
@@ -509,11 +523,11 @@ def create_plot():
     datas.to_csv(f"{save_dir}/Protect result_{count + 1}.csv")
         
 if __name__ == "__main__":
-    #network = network_setup()
-    #pro_example, dc = sim_setup(network.get_node("node_A"), network.get_node("node_B"), 1, np.pi/3, 0.2)
-    #pro_example.start()
-    #ns.sim_run()
-    #print("Average fidelity of generated entanglement with protection: {}".format(dc.dataframe["fidelity"].mean()))
+    network = network_setup()
+    pro_example, dc = sim_setup(network.get_node("node_A"), network.get_node("node_B"), 1, np.pi/3, 0.2)
+    pro_example.start()
+    ns.sim_run()
+    print("Average fidelity of generated entanglement with protection: {}".format(dc.dataframe["fidelity"].mean()))
     #print("Average resource with protection: {}".format(dc.dataframe["pairs"].mean()))
     #print("Average probability of success with protection: {}".format(dc.dataframe["probability"].mean()))
-    create_plot()
+    #create_plot()
