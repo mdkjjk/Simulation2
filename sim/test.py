@@ -47,7 +47,6 @@ class Protect(NodeProtocol):   # Alice側のプロトコル
         self.port = port
         # TODO rename this expression to 'qubit input'
         self.start_expression = start_expression
-        self.num_runs = 0
         self.pair_id = pair_id
         self.local_qcount = 0
         self.local_meas_result = None
@@ -92,7 +91,6 @@ class Protect(NodeProtocol):   # Alice側のプロトコル
         return super().start()
 
     def _handle_qubit_rx(self):
-        self.num_runs += 1
         #print(f"{self.name}: Sim {self.num_runs}")
         pos1, pos2 = self._qmem_positions
         if self.node.qmemory.busy:
@@ -102,17 +100,12 @@ class Protect(NodeProtocol):   # Alice側のプロトコル
         if self.node.qmemory.busy:
             yield self.await_program(self.node.qmemory)
         self.local_meas_result = output["instr"][0]
-        print(f"{self.name}: Result = {self.local_meas_result}")
+        #print(f"{self.name}: Result = {self.local_meas_result}")
         self.local_qcount += 1
         self.port.tx_output(Message([self.local_qcount, self.local_meas_result], header=self.header))
-        print(
-            f"{self.name}: "
-            f"Sending classical result "
-            f"[{self.local_qcount}, {self.local_meas_result}] "
-            f"to {self.port.name}"
-        )
+        print(f"{self.name}: Sending classical result [{self.local_qcount}, {self.local_meas_result}]")
         if self.local_meas_result == 1:
-            print(f"{self.name}: Flip operation")
+            #print(f"{self.name}: Flip operation")
             if self.node.qmemory.busy:
                 yield self.await_program(self.node.qmemory)
             self.node.qmemory.execute_instruction(INSTR_X, [pos2])
@@ -120,8 +113,8 @@ class Protect(NodeProtocol):   # Alice側のプロトコル
                      "protocol": self.name,
                      "mem_pos": pos2}
         qubit = self.node.qmemory.pop(positions=pos2, meta_data=meta_data)
-        print(qubit)
-        print(f"{self.name}: {self.node.qmemory.used_positions}")
+        #print(qubit)
+        #print(f"{self.name}: {self.node.qmemory.used_positions}")
         self._qmem_positions[1] = None
         #self._check_success()
 
@@ -139,9 +132,9 @@ class Protect(NodeProtocol):   # Alice側のプロトコル
             self.local_meas_result = None
             self.remote_meas_result = None
         else:
-            self.send_signal(Signals.SUCCESS, [self._qmem_positions[0], self.num_runs])
+            self.send_signal(Signals.SUCCESS, [self._qmem_positions[0], self.local_qcount])
             print(f"{self.name}: SUCCESS")
-            self.num_runs = 0
+            self.local_qcount = 0
 
     def _handle_fail(self):
         positions = [pos for pos in self._qmem_positions if pos is not None]
@@ -180,20 +173,13 @@ class RWMeasure(NodeProtocol):   # Bob側のプロトコル
         self.rwmeas_ops1 = [n1, n1_]
     
     def run(self):
-        print(f"{self.name}: RUN STARTED")
-        print(
-            f"{self.name}: "
-            f"classical port = {self.port_c.name}"
-        )
+        #print(f"{self.name}: RUN STARTED")
+        #print(f"{self.name}: classical port = {self.port_c.name}")
 
         while True:
-            print(f"{self.name}: waiting for classical or quantum message")
+            #print(f"{self.name}: waiting for classical or quantum message")
             cchannel_ready = self.await_port_input(self.port_c)
-
-            dispatcher_ready = self.await_signal(
-                self.dispatcher,
-                Signals.SUCCESS
-            )
+            dispatcher_ready = self.await_signal(self.dispatcher, Signals.SUCCESS)
 
             expr = yield cchannel_ready | dispatcher_ready
 
@@ -202,61 +188,36 @@ class RWMeasure(NodeProtocol):   # Bob側のプロトコル
             # ==================================================
 
             if expr.first_term.value:
-                print(f"{self.name}: CLASSICAL CHANNEL EVENT")
+                #print(f"{self.name}: CLASSICAL CHANNEL EVENT")
                 classical_message = self.port_c.rx_input()
 
                 if classical_message:
-
-                    self.remote_qcount, self.remote_meas_result = (
-                        classical_message.items
-                    )
-
-                    print(
-                        f"{self.name}: "
-                        f"Alice's result received {classical_message}"
-                    )
+                    self.remote_qcount, self.remote_meas_result = classical_message.items
+                    print(f"{self.name}: Alice's result received {classical_message}")
 
             # ==================================================
             # Dispatcherから量子ビット到着通知
             # ==================================================
 
             elif expr.second_term.value:
-                print(f"{self.name}: DISPATCHER EVENT")
-                signal_result = self.dispatcher.get_signal_result(
-                    Signals.SUCCESS,
-                    self
-                )
-
-                print(
-                    f"{self.name}: "
-                    f"Dispatcher signal = {signal_result}"
-                )
+                #print(f"{self.name}: DISPATCHER EVENT")
+                signal_result = self.dispatcher.get_signal_result(Signals.SUCCESS, self)
+                print(f"{self.name}: Dispatcher signal = {signal_result}")
 
                 pair_id = signal_result["pair_id"]
                 bob_mem_pos = signal_result["bob_mem_pos"]
 
                 # 自分が担当するpair_idか確認
                 if pair_id != self.pair_id:
-
-                    print(
-                        f"{self.name}: "
-                        f"Ignored pair_id={pair_id}"
-                    )
-
+                    print(f"{self.name}: Ignored pair_id={pair_id}")
                     continue
 
                 self._qmem_pos = [bob_mem_pos]
-
-                print(
-                    f"{self.name}: "
-                    f"Entanglement arrived at Bob qmemory "
-                    f"position {self._qmem_pos}"
-                )
+                print(f"{self.name}: Entanglement arrived at Bob qmemory position {self._qmem_pos}")
 
                 # Alice側の測定結果を受信済みなら
                 # weak measurementを実行
                 if self.remote_meas_result is not None:
-
                     yield from self._handle_qubit_rx()
     
     def start(self):
@@ -298,6 +259,7 @@ class RWMeasure(NodeProtocol):   # Bob側のプロトコル
                 self.local_meas_result == 0):
             print(f"{self.name}: SUCCESS")
             self.send_signal(Signals.SUCCESS, self._qmem_pos[0])
+            self.local_qcount = 0
             self.remote_meas_result = None
         elif self.local_meas_result == 0 and self.local_qcount > self.remote_qcount:
             pass
@@ -316,23 +278,14 @@ class RWMeasure(NodeProtocol):   # Bob側のプロトコル
 
 class QuantumDispatcher(NodeProtocol):
 
-    def __init__(
-        self,
-        node,
-        port_in,
-        name="quantum_dispatcher"
-    ):
+    def __init__(self, node, port_in, name="quantum_dispatcher"):
         super().__init__(node, name=name)
-
         self.port_in = port_in
 
     def run(self):
-
         while True:
-
             # Aliceから量子ビットが届くまで待つ
             yield self.await_port_input(self.port_in)
-
             msg = self.port_in.rx_input()
 
             if msg is None:
@@ -344,10 +297,7 @@ class QuantumDispatcher(NodeProtocol):
 
             pair_id = msg.meta.get("pair_id")
             if pair_id is None:
-                print(
-                    f"{self.name}: "
-                    f"Message has no pair_id. Ignoring this message."
-                )
+                print(f"{self.name}: Message has no pair_id. Ignoring this message.")
                 continue
             alice_mem_pos = msg.meta.get("mem_pos")
             protocol = msg.meta.get("protocol")
@@ -361,29 +311,15 @@ class QuantumDispatcher(NodeProtocol):
             # ==================================================
 
             if pair_id == 1:
-
                 bob_mem_pos = 0
-
-                print(
-                    f"{self.name}: "
-                    f"Dispatching pair 1 -> Bob qmemory[{bob_mem_pos}]"
-                )
+                print(f"{self.name}: Dispatching pair 1 -> Bob qmemory[{bob_mem_pos}]")
 
             elif pair_id == 2:
-
                 bob_mem_pos = 1
-
-                print(
-                    f"{self.name}: "
-                    f"Dispatching pair 2 -> Bob qmemory[{bob_mem_pos}]"
-                )
+                print(f"{self.name}: Dispatching pair 2 -> Bob qmemory[{bob_mem_pos}]")
 
             else:
-
-                print(
-                    f"{self.name}: "
-                    f"Unknown pair_id = {pair_id}"
-                )
+                print(f"{self.name}: Unknown pair_id = {pair_id}")
                 continue
 
             # ==================================================
@@ -392,15 +328,8 @@ class QuantumDispatcher(NodeProtocol):
 
             qubits = msg.items
 
-            self.node.qmemory.put(
-                qubits,
-                positions=[bob_mem_pos]
-            )
-
-            print(
-                f"{self.name}: "
-                f"Qubit stored at Bob qmemory[{bob_mem_pos}]"
-            )
+            self.node.qmemory.put(qubits, positions=[bob_mem_pos])
+            print(f"{self.name}: Qubit stored at Bob qmemory[{bob_mem_pos}]")
 
             # ==================================================
             # RWMeasureへ到着通知
@@ -435,10 +364,12 @@ class ProtectBennet(LocalProtocol):
 
             # エンタングルメント生成プロトコルの開始条件
             self.subprotocols["entangle_A1"].start_expression = (
-                                    self.subprotocols["entangle_A1"].await_signal(self, Signals.WAITING))
+                                    self.subprotocols["entangle_A1"].await_signal(self, Signals.WAITING) |
+                                    self.subprotocols["entangle_A1"].await_signal(self.subprotocols["protect_A1"], Signals.FAIL))
             self.subprotocols["entangle_A2"].start_expression = (
-                                    self.subprotocols["entangle_A2"].await_signal(
-                                        self.subprotocols["entangle_A1"], Signals.SUCCESS))
+                                    self.subprotocols["entangle_A2"].await_signal(self.subprotocols["protect_A1"], Signals.SUCCESS) |
+                                    self.subprotocols["entangle_A2"].await_signal(self.subprotocols["protect_A2"], Signals.FAIL))
+                                        
 
             # 保護処理プロトコルの開始条件                        
             self.subprotocols["protect_A1"].start_expression = (

@@ -107,7 +107,7 @@ class LocalEntangle(NodeProtocol):
                     self.node.qmemory.execute_instruction(INSTR_SWAP, [self._mem_pos1, mem_pos1])
                     if self.node.qmemory.busy:
                         yield self.await_program(self.node.qmemory)
-                #print(f"{self.name}:Entanglement Pair")
+                print(f"{self.name}:Entanglement Pair generated")
                 #print(qapi.reduced_dm(self.node.qmemory.peek([mem_pos0, mem_pos1])))
                 self.entangled_pairs += 1
                 result = {"mem_pos0": mem_pos0,
