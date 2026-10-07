@@ -34,7 +34,6 @@ from netsquid.protocols.nodeprotocols import NodeProtocol, LocalProtocol
 from netsquid.util.simtools import sim_time
 from netsquid.util.datacollector import DataCollector
 from netsquid.util.constrainedmap import ValueConstraint
-from netsquid.examples.entanglenodes import EntangleNodes
 from pydynaa import EventExpression
 
 ns.set_qstate_formalism(QFormalism.DM)
@@ -127,12 +126,12 @@ class Protect(NodeProtocol):   # Alice側のプロトコル
         if self.remote_meas_result == 1:
             self._handle_fail()
             self.send_signal(Signals.FAIL, self.local_qcount)
-            print(f"{self.name}: FAIL")
+            #print(f"{self.name}: FAIL")
             self.local_meas_result = None
             self.remote_meas_result = None
         else:
             self.send_signal(Signals.SUCCESS, [self._qmem_positions[0], self.local_qcount])
-            print(f"{self.name}: SUCCESS")
+            #print(f"{self.name}: SUCCESS")
             self.local_qcount = 0
 
     def _handle_fail(self):
@@ -255,7 +254,7 @@ class RWMeasure(NodeProtocol):   # Bob側のプロトコル
     def _check_success(self):
         if (self.local_qcount > 0 and self.local_qcount == self.remote_qcount and
                 self.local_meas_result == 0):
-            print(f"{self.name}: SUCCESS")
+            #print(f"{self.name}: SUCCESS")
             self.send_signal(Signals.SUCCESS, self._qmem_pos[0])
             self.local_qcount = 0
             self.remote_meas_result = None
@@ -263,7 +262,7 @@ class RWMeasure(NodeProtocol):   # Bob側のプロトコル
             pass
         else:
             self._handle_fail()
-            print(f"{self.name}: FAIL")
+            #print(f"{self.name}: FAIL")
             self.send_signal(Signals.FAIL, self.local_qcount)
             self.local_meas_result = None
             self.remote_meas_result = None
@@ -465,12 +464,12 @@ class Bennet(NodeProtocol):
                 self.remote_meas_result is not None):
             if self.local_meas_result == self.remote_meas_result:
                 self.send_signal(Signals.SUCCESS, [self._qmem_positions[0], self.num_runs])
-                print(f"{self.name}: SUCCESS / time: {sim_time()}")
+                #print(f"{self.name}: SUCCESS / time: {sim_time()}")
                 self.num_runs = 0
             else:
                 self._clear_qmem_positions()
                 self.send_signal(Signals.FAIL, self.local_qcount)
-                print(f"{self.name}: FAIL")
+                #print(f"{self.name}: FAIL")
             self.local_meas_result = None
             self.remote_meas_result = None
             self._qmem_positions = [None, None]
@@ -657,7 +656,7 @@ def network_setup(source_delay=1e5, source_fidelity_sq=0.8, depolar_rate=200, no
 
 if __name__ == "__main__":
     network = network_setup()
-    pb_example, dc = sim_setup(network.get_node("node_A"), network.get_node("node_B"), 1, np.pi/3, 0.2)
+    pb_example, dc = sim_setup(network.get_node("node_A"), network.get_node("node_B"), 3, np.pi/3, 0.2)
     pb_example.start()
     ns.sim_run()
     print("Fidelity of generated entanglement: {}".format(dc.dataframe["fidelity"].mean()))

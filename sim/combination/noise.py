@@ -61,7 +61,7 @@ class AmplitudeNoiseModel(QuantumErrorModel):
         if self.time_independent:   # 時間非依存
             for qubit in qubits:
                 if qubit is not None:
-                    qapi.amplitude_dampen(qubit, gamma)
+                    qapi.amplitude_dampen(qubit, self.gamma)
         else:                       # 時間依存
             for qubit in qubits:
                 if qubit is not None:
