@@ -21,7 +21,7 @@ from netsquid.nodes.node import Node
 from netsquid.nodes.network import Network
 from netsquid.nodes.connections import DirectConnection
 from netsquid.components import ClassicalChannel, QuantumChannel
-from netsquid.components.instructions import INSTR_MEASURE, INSTR_CNOT, INSTR_X, INSTR_SWAP
+from netsquid.components.instructions import INSTR_MEASURE, INSTR_CNOT, INSTR_X, INSTR_Y, INSTR_SWAP
 from netsquid.components.component import Message, Port
 from netsquid.components.qsource import QSource, SourceStatus
 from netsquid.components.qprocessor import QuantumProcessor
@@ -73,13 +73,13 @@ class Protect(NodeProtocol):   # Alice側のプロトコル
                 classical_message = self.port.rx_input(header=self.header)
                 if classical_message:
                     self.remote_qcount, self.remote_meas_result = classical_message.items
-                    print(f"{self.name}: Bob's result received {classical_message}")
+                    #print(f"{self.name}: Bob's result received {classical_message}")
                     self._handle_cchannel_rx()
             elif expr.second_term.value:
                 source_protocol = expr.second_term.atomic_source
                 ready_signal = source_protocol.get_signal_by_event(
                         event=expr.second_term.triggered_events[0], receiver=self) # エンタングルメントが保存されたメモリポジションを取得
-                print(f"{self.name}: Entanglement received at {ready_signal.result} / time: {sim_time()}")      
+                #print(f"{self.name}: Entanglement received at {ready_signal.result} / time: {sim_time()}")      
                 self._qmem_positions[0] = ready_signal.result["mem_pos0"]
                 self._qmem_positions[1] = ready_signal.result["mem_pos1"]
                 yield from self._handle_qubit_rx()
@@ -104,7 +104,7 @@ class Protect(NodeProtocol):   # Alice側のプロトコル
         #print(f"{self.name}: Result = {self.local_meas_result}")
         self.local_qcount += 1
         self.port.tx_output(Message([self.local_qcount, self.local_meas_result], header=self.header))
-        print(f"{self.name}: Sending classical result [{self.local_qcount}, {self.local_meas_result}]")
+        #print(f"{self.name}: Sending classical result [{self.local_qcount}, {self.local_meas_result}]")
         if self.local_meas_result == 1:
             #print(f"{self.name}: Flip operation")
             if self.node.qmemory.busy:
@@ -191,7 +191,7 @@ class RWMeasure(NodeProtocol):   # Bob側のプロトコル
 
                 if classical_message:
                     self.remote_qcount, self.remote_meas_result = classical_message.items
-                    print(f"{self.name}: Alice's result received {classical_message}")
+                    #print(f"{self.name}: Alice's result received {classical_message}")
 
             # ==================================================
             # Dispatcherから量子ビット到着通知
@@ -200,18 +200,18 @@ class RWMeasure(NodeProtocol):   # Bob側のプロトコル
             elif expr.second_term.value:
                 #print(f"{self.name}: DISPATCHER EVENT")
                 signal_result = self.dispatcher.get_signal_result(Signals.SUCCESS, self)
-                print(f"{self.name}: Dispatcher signal = {signal_result}")
+                #print(f"{self.name}: Dispatcher signal = {signal_result}")
 
                 pair_id = signal_result["pair_id"]
                 bob_mem_pos = signal_result["bob_mem_pos"]
 
                 # 自分が担当するpair_idか確認
                 if pair_id != self.pair_id:
-                    print(f"{self.name}: Ignored pair_id={pair_id}")
+                    #print(f"{self.name}: Ignored pair_id={pair_id}")
                     continue
 
                 self._qmem_pos = [bob_mem_pos]
-                print(f"{self.name}: Entanglement arrived at Bob qmemory position {self._qmem_pos}")
+                #print(f"{self.name}: Entanglement arrived at Bob qmemory position {self._qmem_pos}")
 
                 # Alice側の測定結果を受信済みなら
                 # weak measurementを実行
@@ -230,7 +230,7 @@ class RWMeasure(NodeProtocol):   # Bob側のプロトコル
 
     def _handle_qubit_rx(self):
         self.local_qcount += 1
-        print(f"{self.name}: Local qcount is {self.local_qcount}")
+        #print(f"{self.name}: Local qcount is {self.local_qcount}")
         pos = self._qmem_pos[0]
         if self.node.qmemory.busy:
             yield self.await_program(self.node.qmemory)
@@ -295,7 +295,7 @@ class QuantumDispatcher(NodeProtocol):
 
             pair_id = msg.meta.get("pair_id")
             if pair_id is None:
-                print(f"{self.name}: Message has no pair_id. Ignoring this message.")
+                #print(f"{self.name}: Message has no pair_id. Ignoring this message.")
                 continue
             alice_mem_pos = msg.meta.get("mem_pos")
             protocol = msg.meta.get("protocol")
@@ -310,14 +310,14 @@ class QuantumDispatcher(NodeProtocol):
 
             if pair_id == 1:
                 bob_mem_pos = 0
-                print(f"{self.name}: Dispatching pair 1 -> Bob qmemory[{bob_mem_pos}]")
+                #print(f"{self.name}: Dispatching pair 1 -> Bob qmemory[{bob_mem_pos}]")
 
             elif pair_id == 2:
                 bob_mem_pos = 1
-                print(f"{self.name}: Dispatching pair 2 -> Bob qmemory[{bob_mem_pos}]")
+                #print(f"{self.name}: Dispatching pair 2 -> Bob qmemory[{bob_mem_pos}]")
 
             else:
-                print(f"{self.name}: Unknown pair_id = {pair_id}")
+                #print(f"{self.name}: Unknown pair_id = {pair_id}")
                 continue
 
             # ==================================================
@@ -327,7 +327,7 @@ class QuantumDispatcher(NodeProtocol):
             qubits = msg.items
 
             self.node.qmemory.put(qubits, positions=[bob_mem_pos])
-            print(f"{self.name}: Qubit stored at Bob qmemory[{bob_mem_pos}]")
+            #print(f"{self.name}: Qubit stored at Bob qmemory[{bob_mem_pos}]")
 
             # ==================================================
             # RWMeasureへ到着通知
@@ -377,8 +377,8 @@ class Bennet(NodeProtocol):
     def _measure_program(self):   # 測定（Alice & Bob）
         prog = QuantumProgram(num_qubits=2)
         q1, q2 = prog.get_qubit_indices(2)
-        prog.apply(INSTR_CNOT, [q2, q1])
-        prog.apply(INSTR_MEASURE, q1, output_key="M", inplace=False)
+        prog.apply(INSTR_CNOT, [q1, q2])
+        prog.apply(INSTR_MEASURE, q2, output_key="M", inplace=False)
         return prog   # 測定結果をreturn
 
     def _reverse_program(self):   # 逆回転（Aliceのみ）
@@ -388,26 +388,45 @@ class Bennet(NodeProtocol):
         return prog
 
     def run(self):
-        print(f"{self.name}:Start")
+        #print(f"{self.name}:Start")
         cchannel_ready = self.await_port_input(self.port)
         qmemory_ready = self.start_expression
+
         while True:
             expr = yield cchannel_ready | qmemory_ready
-            # 測定結果を受信した場合
+
+            # ==================================================
+            # Bobから古典測定結果を受信した場合
+            # ==================================================
             if expr.first_term.value:
                 classical_message = self.port.rx_input(header=self.header)
-                print(f"{self.name}: result {classical_message.items} received")
                 if classical_message:
                     self.remote_qcount, self.remote_meas_result = classical_message.items
-            # エンタングルメントを受信した場合
+                    #print(f"{self.name}: result {classical_message.items} received")
+
+            # ==================================================
+            # Bennett精製の開始条件が成立した場合
+            # ==================================================
             elif expr.second_term.value:
-                source_protocol = expr.second_term.atomic_source
-                # エンタングルメントが保存されたメモリポジションを取得
-                ready_signal = source_protocol.get_signal_by_event(
-                    event=expr.second_term.triggered_events[0], receiver=self)
-                print(f"{self.name}: Entanglement received at {ready_signal.result} / time: {sim_time()}")
-                print(f"{self.name}: {self.node.qmemory.used_positions}")
-                yield from self._handle_new_qubit(ready_signal.result)
+                #print(f"{self.name}: Bennett purification start / time: {sim_time()}")
+
+                # ----------------------------------------------
+                # 使用する量子ビットのメモリ位置を設定
+                # ----------------------------------------------
+                if self.role.upper() == "A":
+                    self._qmem_positions = [0, 2]
+                else:
+                    self._qmem_positions = [0, 1]
+                self.local_qcount += 1
+                #print(f"{self.name}: Bennett qubits = {self._qmem_positions}")
+
+                # 2組のエンタングルメントを用いて
+                # Bennett型エンタングルメント精製を実行
+                yield from self._node_do_bennet()
+
+            # ==================================================
+            # 測定結果が揃ったか確認
+            # ==================================================
             self._check_success()
     
     def start(self):
@@ -425,40 +444,18 @@ class Bennet(NodeProtocol):
             self.node.qmemory.pop(positions=positions)
         self._qmem_positions = [None, None]
 
-    def _handle_new_qubit(self, memory_position):
-        assert not self.node.qmemory.mem_positions[memory_position].is_empty
-        
-        if self._waiting_on_second_qubit:   # 2つ目のエンタングルメントが到着した場合
-            assert not self.node.qmemory.mem_positions[self._qmem_positions[0]].is_empty
-            assert memory_position != self._qmem_positions[0]
-            self._qmem_positions[1] = memory_position
-            self._waiting_on_second_qubit = False
-            yield from self._node_do_bennet()   # 精製処理を行う
-        else:   # 1つ目のエンタングルメントが到着した場合
-            self.num_runs += 1
-            #print(f"{self.name}: Sim {self.num_runs}")
-            # Pop previous qubit if present:
-            pop_positions = [p for p in self._qmem_positions if p is not None and p != memory_position]
-            if len(pop_positions) > 0:
-                self.node.qmemory.pop(positions=pop_positions)
-            # Set new position:
-            self._qmem_positions[0] = memory_position
-            self._qmem_positions[1] = None
-            self.local_qcount += 1
-            self.local_meas_result = None
-            self._waiting_on_second_qubit = True
-
     def _node_do_bennet(self):   # 精製処理
+        self.num_runs += 1
         pos1, pos2 = self._qmem_positions
         if self.node.qmemory.busy:
             yield self.await_program(self.node.qmemory)
-        if self.role.upper() == "A":   # Aliceの場合、回転操作を行う
-            yield self.node.qmemory.execute_program(self._rotprog, [pos1, pos2])
+        #if self.role.upper() == "A":   # Aliceの場合、回転操作を行う
+            #yield self.node.qmemory.execute_program(self._rotprog, [pos1, pos2])
         yield self.node.qmemory.execute_program(self._measprog, [pos1, pos2])   # 測定
-        if self.role.upper() == "A":   # Aliceの場合、回転操作を行う
-            yield self.node.qmemory.execute_program(self._reprog, [pos2])
+        #if self.role.upper() == "A":   # Aliceの場合、回転操作を行う
+            #yield self.node.qmemory.execute_program(self._reprog, [pos2])
         self.local_meas_result = self._measprog.output["M"][0]
-        self._qmem_positions[0] = None
+        self._qmem_positions[1] = None
         self.port.tx_output(Message([self.local_qcount, self.local_meas_result],
                                     header=self.header))   # 測定結果をBobに送信
         
@@ -467,13 +464,13 @@ class Bennet(NodeProtocol):
                 self.local_meas_result is not None and
                 self.remote_meas_result is not None):
             if self.local_meas_result == self.remote_meas_result:
-                self.send_signal(Signals.SUCCESS, [self._qmem_positions[1], self.num_runs])
-                #print(f"{self.name}: SUCCESS / time: {sim_time()}")
+                self.send_signal(Signals.SUCCESS, [self._qmem_positions[0], self.num_runs])
+                print(f"{self.name}: SUCCESS / time: {sim_time()}")
                 self.num_runs = 0
             else:
                 self._clear_qmem_positions()
                 self.send_signal(Signals.FAIL, self.local_qcount)
-                #print(f"{self.name}: FAIL")
+                print(f"{self.name}: FAIL")
             self.local_meas_result = None
             self.remote_meas_result = None
             self._qmem_positions = [None, None]
@@ -507,12 +504,14 @@ class ProtectBennet(LocalProtocol):
                                          pair_id=2, theta=theta, name="rwmeasure_B2"))
             self.add_subprotocol(Bennet(node_a, node_a.ports["cout_bob"], role="A", name="bennet_A"))
             self.add_subprotocol(Bennet(node_b, node_b.ports["cin_alice"], role="B", name="bennet_B"))
-                                          
+            self.add_subprotocol(BellMeasurement(node=node_a, port=node_a.ports["cout_bob"], name="teleport_A"))
+            self.add_subprotocol(Correction(node=node_b, name="teleport_B"))
 
             # エンタングルメント生成プロトコルの開始条件
             self.subprotocols["entangle_A1"].start_expression = (
                                     self.subprotocols["entangle_A1"].await_signal(self, Signals.WAITING) |
-                                    self.subprotocols["entangle_A1"].await_signal(self.subprotocols["protect_A1"], Signals.FAIL))
+                                    self.subprotocols["entangle_A1"].await_signal(self.subprotocols["protect_A1"], Signals.FAIL) |
+                                    self.subprotocols["entangle_A1"].await_signal(self.subprotocols["bennet_A"], Signals.FAIL))
             self.subprotocols["entangle_A2"].start_expression = (
                                     self.subprotocols["entangle_A2"].await_signal(self.subprotocols["protect_A1"], Signals.SUCCESS) |
                                     self.subprotocols["entangle_A2"].await_signal(self.subprotocols["protect_A2"], Signals.FAIL))
@@ -531,12 +530,16 @@ class ProtectBennet(LocalProtocol):
 
             # 精製処理プロトコルの開始条件                        
             self.subprotocols["bennet_A"].start_expression = (
-                self.subprotocols["bennet_A"].await_signal(self.subprotocols["protect_A1"], Signals.SUCCESS) |
                 self.subprotocols["bennet_A"].await_signal(self.subprotocols["protect_A2"], Signals.SUCCESS))
                                                             
             self.subprotocols["bennet_B"].start_expression = (
-                self.subprotocols["bennet_B"].await_signal(self.subprotocols["rwmeasure_B1"], Signals.SUCCESS) |
                 self.subprotocols["bennet_B"].await_signal(self.subprotocols["rwmeasure_B2"], Signals.SUCCESS))  
+
+            # テレポーテーションプロトコルの開始条件
+            self.subprotocols["teleport_A"].start_expression = self.subprotocols["teleport_A"].await_signal(
+                                                                self.subprotocols["bennet_A"], Signals.SUCCESS)
+            self.subprotocols["teleport_B"].start_expression = self.subprotocols["teleport_B"].await_signal(
+                                                                self.subprotocols["bennet_B"], Signals.SUCCESS)
                                                                                                          
 
     def run(self):
@@ -547,20 +550,24 @@ class ProtectBennet(LocalProtocol):
                 self.subprotocols["entangle_A1"].entangled_pairs = 0
                 self.subprotocols["entangle_A2"].entangled_pairs = 0
                 self.send_signal(Signals.WAITING)
-                yield (self.await_signal(self.subprotocols["bennet_A"], Signals.SUCCESS)
-                       & self.await_signal(self.subprotocols["bennet_B"], Signals.SUCCESS))
+                yield (self.await_signal(self.subprotocols["teleport_A"], Signals.SUCCESS)
+                       & self.await_signal(self.subprotocols["teleport_B"], Signals.SUCCESS))
                 signal_A = self.subprotocols["bennet_A"].get_signal_result(Signals.SUCCESS, self)
-                signal_B = self.subprotocols["bennet_B"].get_signal_result(Signals.SUCCESS, self)
                 result_en = {
                     "pairs1": self.subprotocols["entangle_A1"].entangled_pairs,
                     "pairs2": self.subprotocols["entangle_A2"].entangled_pairs,
-                    "pos_A": signal_A[0],
-                    "pos_B": signal_B[0],
-                    "runs_A": signal_A[1],
-                    "runs_B": signal_B[1],
+                    "runs": signal_A[1],
                     "time": sim_time() - start_time
                 }
-                self.send_signal(Signals.SUCCESS, result_en)
+                result_A = self.subprotocols["teleport_A"].get_signal_result(Signals.SUCCESS, self)
+                result_B = self.subprotocols["teleport_B"].get_signal_result(Signals.SUCCESS, self)
+                result_tel = {
+                    "pos_A0": result_A["pos_A0"],
+                    "pos_A1": result_A["pos_A1"],
+                    "pos_B": result_B,
+                    "time": sim_time() - start_time
+                }
+                self.send_signal(Signals.SUCCESS, [result_en, result_tel])
 
 def sim_setup(node_a, node_b, num_runs, omega, theta):
     pb_example = ProtectBennet(node_a, node_b, num_runs, omega, theta)
@@ -568,16 +575,16 @@ def sim_setup(node_a, node_b, num_runs, omega, theta):
     def record_run(evexpr):
         # Callback that collects data each run
         protocol = evexpr.triggered_events[-1].source
-        result_en = protocol.get_signal_result(Signals.SUCCESS)
+        result_en, result_tel = protocol.get_signal_result(Signals.SUCCESS)
         print(result_en)
-        q_A, = node_a.qmemory.peek(positions=[result_en["pos_A"]])
-        print(q_A)
-        q_B, = node_a.qmemory.peek(positions=[result_en["pos_B"]])
-        print(q_B)
+        node_a.qmemory.discard(positions=[result_tel["pos_A0"]]) # 使用しているメモリを解放
+        node_a.qmemory.discard(positions=[result_tel["pos_A1"]])
+        q_B, = node_b.qmemory.pop(positions=[result_tel["pos_B"]])
         #print(qapi.reduced_dm([q_A, q_B]))
         pairs = result_en["pairs1"] + result_en["pairs2"]
         prob = 1 / result_en["runs"]
-        return {"pairs": pairs, "probability": prob, "time": result_en["time"]}
+        f2 = qapi.fidelity(q_B, ks.y0, squared=True)
+        return {"fidelity": f2, "pairs": pairs, "probability": prob, "time": result_en["time"]}
 
     dc = DataCollector(record_run, include_time_stamp=False,
                         include_entity_name=False)
@@ -585,7 +592,7 @@ def sim_setup(node_a, node_b, num_runs, omega, theta):
                                         event_type=Signals.SUCCESS.value))
     return pb_example, dc
 
-def network_setup(source_delay=1e5, source_fidelity_sq=0.8, depolar_rate=100, node_distance=10):
+def network_setup(source_delay=1e5, source_fidelity_sq=0.8, depolar_rate=200, node_distance=200):
     network = Network("wmeasure_network")
 
     # ノード設定
@@ -653,5 +660,5 @@ if __name__ == "__main__":
     pb_example, dc = sim_setup(network.get_node("node_A"), network.get_node("node_B"), 1, np.pi/3, 0.2)
     pb_example.start()
     ns.sim_run()
-    #print("Fidelity of generated entanglement: {}".format(dc.dataframe["fidelity1"].mean()))
+    print("Fidelity of generated entanglement: {}".format(dc.dataframe["fidelity"].mean()))
     #print("Fidelity of generated entanglement: {}".format(dc.dataframe["fidelity2"].mean()))
