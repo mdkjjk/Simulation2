@@ -103,14 +103,14 @@ class Filter(NodeProtocol):
                 classical_message = self.port.rx_input(header=self.header)
                 if classical_message:
                     self.remote_qcount, self.remote_meas_OK = classical_message.items
-                    #print(f"{self.name}: Result received at {classical_message} / time: {sim_time()}")
+                    print(f"{self.name}: Result received at {classical_message} / time: {sim_time()}")
                     self._handle_cchannel_rx()
             elif expr.second_term.value:
                 source_protocol = expr.second_term.atomic_source
                 ready_signal = source_protocol.get_signal_by_event(
                     event=expr.second_term.triggered_events[0], receiver=self)
                 self._qmem_pos = ready_signal.result
-                #print(f"{self.name}: Entanglement received at {self._qmem_pos} / time: {sim_time()}")
+                print(f"{self.name}: Entanglement received at {self._qmem_pos} / time: {sim_time()}")
                 yield from self._handle_qubit_rx()
 
     # TODO does start reset vars?
@@ -158,9 +158,10 @@ class Filter(NodeProtocol):
                 self.local_meas_OK and self.remote_meas_OK):
             # SUCCESS!
             self.send_signal(Signals.SUCCESS, [self._qmem_pos, self.num_runs])
-            #print(f"{self.name}: SUCCESS / time: {sim_time()}")
+            print(f"{self.name}: SUCCESS / time: {sim_time()}")
             self._qmem_pos = None
             self.num_runs = 0
+            self.local_qcount = 0
         elif self.local_meas_OK and self.local_qcount > self.remote_qcount:
             # Need to wait for latest remote status
             pass
@@ -168,7 +169,7 @@ class Filter(NodeProtocol):
             # FAILURE
             self._handle_fail()
             self.send_signal(Signals.FAIL, self.local_qcount)
-            #print(f"{self.name}: FAIL / time: {sim_time()}")
+            print(f"{self.name}: FAIL / time: {sim_time()}")
             self._qmem_pos = None
 
     def _handle_fail(self):

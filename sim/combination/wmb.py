@@ -412,12 +412,12 @@ class Bennet(NodeProtocol):
                 # ----------------------------------------------
                 # 使用する量子ビットのメモリ位置を設定
                 # ----------------------------------------------
-                if self.role.upper() == "A":
+                if self.name == "bennet_A":
                     self._qmem_positions = [0, 2]
                 else:
                     self._qmem_positions = [0, 1]
                 self.local_qcount += 1
-                #print(f"{self.name}: Bennett qubits = {self._qmem_positions}")
+                print(f"{self.name}: Bennett qubits = {self._qmem_positions}")
 
                 # 2組のエンタングルメントを用いて
                 # Bennett型エンタングルメント精製を実行
@@ -464,12 +464,12 @@ class Bennet(NodeProtocol):
                 self.remote_meas_result is not None):
             if self.local_meas_result == self.remote_meas_result:
                 self.send_signal(Signals.SUCCESS, [self._qmem_positions[0], self.num_runs])
-                #print(f"{self.name}: SUCCESS / time: {sim_time()}")
+                print(f"{self.name}: SUCCESS / time: {sim_time()}")
                 self.num_runs = 0
             else:
                 self._clear_qmem_positions()
                 self.send_signal(Signals.FAIL, self.local_qcount)
-                #print(f"{self.name}: FAIL")
+                print(f"{self.name}: FAIL")
             self.local_meas_result = None
             self.remote_meas_result = None
             self._qmem_positions = [None, None]
@@ -495,6 +495,7 @@ class ProtectBennet(LocalProtocol):
                                                input_mem_pos1=1, num_pairs=1, name="entangle_A1"))
             self.add_subprotocol(LocalEntangle(node=node_a, qsource_name="QSource_A2", input_mem_pos0=2,
                                                input_mem_pos1=3, num_pairs=1, name="entangle_A2"))
+            # 保護処理プロトコル
             self.add_subprotocol(Protect(node_a, node_a.ports["cout_bob1"], omega=omega, pair_id=1, name="protect_A1"))
             self.add_subprotocol(Protect(node_a, node_a.ports["cout_bob2"], omega=omega,pair_id=2, name="protect_A2"))
             self.add_subprotocol(QuantumDispatcher(node_b, node_b.ports["qdispatch_in"], name="quantum_dispatcher"))
@@ -502,8 +503,10 @@ class ProtectBennet(LocalProtocol):
                                          pair_id=1, theta=theta, name="rwmeasure_B1"))
             self.add_subprotocol(RWMeasure(node_b, node_b.ports["cin_alice2"], self.subprotocols["quantum_dispatcher"],
                                          pair_id=2, theta=theta, name="rwmeasure_B2"))
+            # 精製処理プロトコル
             self.add_subprotocol(Bennet(node_a, node_a.ports["cout_bob"], role="A", name="bennet_A"))
             self.add_subprotocol(Bennet(node_b, node_b.ports["cin_alice"], role="B", name="bennet_B"))
+            # テレポーテーションプロトコル
             self.add_subprotocol(BellMeasurement(node=node_a, port=node_a.ports["cout_bob"], name="teleport_A"))
             self.add_subprotocol(Correction(node=node_b, name="teleport_B"))
 

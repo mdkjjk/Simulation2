@@ -205,6 +205,7 @@ class ProtectDeutsch(LocalProtocol):
                                                input_mem_pos1=1, num_pairs=1, name="entangle_A1"))
             self.add_subprotocol(LocalEntangle(node=node_a, qsource_name="QSource_A2", input_mem_pos0=2,
                                                input_mem_pos1=3, num_pairs=1, name="entangle_A2"))
+            # 保護処理プロトコル
             self.add_subprotocol(Protect(node_a, node_a.ports["cout_bob1"], omega=omega, pair_id=1, name="protect_A1"))
             self.add_subprotocol(Protect(node_a, node_a.ports["cout_bob2"], omega=omega,pair_id=2, name="protect_A2"))
             self.add_subprotocol(QuantumDispatcher(node_b, node_b.ports["qdispatch_in"], name="quantum_dispatcher"))
@@ -212,8 +213,10 @@ class ProtectDeutsch(LocalProtocol):
                                          pair_id=1, theta=theta, name="rwmeasure_B1"))
             self.add_subprotocol(RWMeasure(node_b, node_b.ports["cin_alice2"], self.subprotocols["quantum_dispatcher"],
                                          pair_id=2, theta=theta, name="rwmeasure_B2"))
+            # 精製処理プロトコル
             self.add_subprotocol(Distil(node_a, node_a.ports["cout_bob"], role="A", name="deutsch_A"))
             self.add_subprotocol(Distil(node_b, node_b.ports["cin_alice"], role="B", name="deutsch_B"))
+            # テレポーテーションプロトコル
             self.add_subprotocol(BellMeasurement(node=node_a, port=node_a.ports["cout_bob"], name="teleport_A"))
             self.add_subprotocol(Correction(node=node_b, name="teleport_B"))
 
