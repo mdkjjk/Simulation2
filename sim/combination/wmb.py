@@ -485,6 +485,7 @@ class Bennet(NodeProtocol):
         if self.node.qmemory.num_positions < 2:
             return False
         return True
+    
 class ProtectBennet(LocalProtocol):
     def __init__(self, node_a, node_b, num_runs, omega, theta):
             super().__init__(nodes={"A": node_a, "B": node_b}, name="Protect&Bennet")

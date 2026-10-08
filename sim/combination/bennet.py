@@ -4,9 +4,7 @@ import pydynaa as pd
 import pandas
 import matplotlib, os
 from matplotlib import pyplot as plt
-import noise
 from noise import AmplitudeNoiseModel, PhaseNoiseModel
-import teleportation
 from teleportation import InitStateProgram, BellMeasurement, Correction
 
 from netsquid.qubits import operators as ops
