@@ -66,8 +66,9 @@ class FilteringBennet(LocalProtocol):
                     self.subprotocols["entangle_A1"].await_signal(self.subprotocols["filter_A1"], Signals.FAIL) |
                     self.subprotocols["entangle_A1"].await_signal(self.subprotocols["bennet_A'"], Signals.FAIL))
         self.subprotocols["entangle_A2"].start_expression = (
-                    self.subprotocols["entangle_A2"].await_signal(self.subprotocols["entangle_A1"], Signals.SUCCESS) |
-                    self.subprotocols["entangle_A2"].await_signal(self.subprotocols["filter_A2"], Signals.FAIL))
+                    self.subprotocols["entangle_A2"].await_signal(self, Signals.WAITING) |
+                    self.subprotocols["entangle_A2"].await_signal(self.subprotocols["filter_A2"], Signals.FAIL) |
+                    self.subprotocols["entangle_A2"].await_signal(self.subprotocols["bennet_A'"], Signals.FAIL))
                                                              
         # フィルタープロトコルの開始条件
         self.subprotocols["filter_A1"].start_expression = (
@@ -80,9 +81,11 @@ class FilteringBennet(LocalProtocol):
                     self.subprotocols["filter_B2"].await_signal(self.subprotocols["entangle_B2"], Signals.SUCCESS))   
         # 精製処理プロトコルの開始条件                        
         self.subprotocols["bennet_A'"].start_expression = (
+            self.subprotocols["bennet_A'"].await_signal(self.subprotocols["filter_A1"], Signals.SUCCESS) &
             self.subprotocols["bennet_A'"].await_signal(self.subprotocols["filter_A2"], Signals.SUCCESS))
                                                         
         self.subprotocols["bennet_B'"].start_expression = (
+            self.subprotocols["bennet_B'"].await_signal(self.subprotocols["filter_B1"], Signals.SUCCESS) &
             self.subprotocols["bennet_B'"].await_signal(self.subprotocols["filter_B2"], Signals.SUCCESS))         
                 
         

@@ -393,6 +393,7 @@ class Bennet(NodeProtocol):
 
         while True:
             expr = yield cchannel_ready | qmemory_ready
+            print(f"{self.name}: first_term={expr.first_term.value}, second_term={expr.second_term.value}, time={sim_time()}")
 
             # ==================================================
             # Bobから古典測定結果を受信した場合
@@ -401,13 +402,13 @@ class Bennet(NodeProtocol):
                 classical_message = self.port.rx_input(header=self.header)
                 if classical_message:
                     self.remote_qcount, self.remote_meas_result = classical_message.items
-                    #print(f"{self.name}: result {classical_message.items} received")
+                    print(f"{self.name}: result {classical_message.items} received")
 
             # ==================================================
             # Bennett精製の開始条件が成立した場合
             # ==================================================
             elif expr.second_term.value:
-                #print(f"{self.name}: Bennett purification start / time: {sim_time()}")
+                print(f"{self.name}: Bennett purification start / time: {sim_time()}")
 
                 # ----------------------------------------------
                 # 使用する量子ビットのメモリ位置を設定
@@ -427,6 +428,7 @@ class Bennet(NodeProtocol):
             # 測定結果が揃ったか確認
             # ==================================================
             self._check_success()
+            print(f"{self.name}: waiting again")
     
     def start(self):
         self._clear_qmem_positions()

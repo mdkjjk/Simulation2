@@ -154,6 +154,8 @@ class Filter(NodeProtocol):
     def _check_success(self):
         # Check if protocol succeeded after receiving new input (qubit or classical information).
         # Returns true if protocol has succeeded on this node
+        print(f"{self.name}: Local measure result = {self.local_meas_OK}, Remote measure result = {self.remote_meas_OK}")
+        print(f"{self.name}: local_qcount = {self.local_qcount}, remote_qcount = {self.remote_qcount}")
         if (self.local_qcount > 0 and self.local_qcount == self.remote_qcount and
                 self.local_meas_OK and self.remote_meas_OK):
             # SUCCESS!
@@ -162,6 +164,9 @@ class Filter(NodeProtocol):
             self._qmem_pos = None
             self.num_runs = 0
             self.local_qcount = 0
+            self.remote_qcount = 0
+            self.local_meas_OK = False
+            self.remote_meas_OK = False
         elif self.local_meas_OK and self.local_qcount > self.remote_qcount:
             # Need to wait for latest remote status
             pass
