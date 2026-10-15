@@ -39,7 +39,7 @@ ns.set_qstate_formalism(QFormalism.DM)
 
 class FilteringBennet(LocalProtocol):
     def __init__(self, node_a, node_b, num_runs, epsilon=0.9):
-        super().__init__(nodes={"A": node_a, "B": node_b}, name="Filtering example")
+        super().__init__(nodes={"A": node_a, "B": node_b}, name="Filtering&Bennet")
         self._epsilon = epsilon
         self.num_runs = num_runs
         # エンタングルメント生成プロトコル
@@ -58,7 +58,10 @@ class FilteringBennet(LocalProtocol):
         self.add_subprotocol(Filter(node_b, node_b.ports["cin_alice2"], epsilon=epsilon, name="filter_B2"))
         # 精製処理プロトコル
         self.add_subprotocol(Bennet(node_a, node_a.ports["cout_bob"], role="A", name="bennet_A'"))
-        self.add_subprotocol(Bennet(node_b, node_b.ports["cin_alice"], role="B", name="bennet_B'"))        
+        self.add_subprotocol(Bennet(node_b, node_b.ports["cin_alice"], role="B", name="bennet_B'"))    
+        # テレポーテーションプロトコル
+        self.add_subprotocol(BellMeasurement(node=node_a, port=node_a.ports["cout_bob"], name="teleport_A"))
+        self.add_subprotocol(Correction(node=node_b, name="teleport_B"))    
                                     
         # エンタングルメント生成プロトコルの開始条件
         self.subprotocols["entangle_A1"].start_expression = (
@@ -79,14 +82,21 @@ class FilteringBennet(LocalProtocol):
                     self.subprotocols["filter_A2"].await_signal(self.subprotocols["entangle_A2"], Signals.SUCCESS))
         self.subprotocols["filter_B2"].start_expression = (
                     self.subprotocols["filter_B2"].await_signal(self.subprotocols["entangle_B2"], Signals.SUCCESS))   
+        
         # 精製処理プロトコルの開始条件                        
         self.subprotocols["bennet_A'"].start_expression = (
             self.subprotocols["bennet_A'"].await_signal(self.subprotocols["filter_A1"], Signals.SUCCESS) &
             self.subprotocols["bennet_A'"].await_signal(self.subprotocols["filter_A2"], Signals.SUCCESS))
                                                         
         self.subprotocols["bennet_B'"].start_expression = (
-            self.subprotocols["bennet_B'"].await_signal(self.subprotocols["filter_B1"], Signals.SUCCESS) &
-            self.subprotocols["bennet_B'"].await_signal(self.subprotocols["filter_B2"], Signals.SUCCESS))         
+            self.subprotocols["bennet_B'"].await_signal(self.subprotocols["filter_A1"], Signals.SUCCESS) &
+            self.subprotocols["bennet_B'"].await_signal(self.subprotocols["filter_A2"], Signals.SUCCESS))       
+
+        # テレポーテーションプロトコルの開始条件
+        self.subprotocols["teleport_A"].start_expression = self.subprotocols["teleport_A"].await_signal(
+                                                            self.subprotocols["bennet_A'"], Signals.SUCCESS)
+        self.subprotocols["teleport_B"].start_expression = self.subprotocols["teleport_B"].await_signal(
+                                                            self.subprotocols["bennet_B'"], Signals.SUCCESS)  
                 
         
     def run(self):
@@ -97,42 +107,53 @@ class FilteringBennet(LocalProtocol):
             self.subprotocols["entangle_A1"].entangled_pairs = 0
             self.subprotocols["entangle_A2"].entangled_pairs = 0            
             self.send_signal(Signals.WAITING)
-            yield (self.await_signal(self.subprotocols["bennet_A'"], Signals.SUCCESS) &
-                   self.await_signal(self.subprotocols["bennet_B'"], Signals.SUCCESS))
-            signal_A = self.subprotocols["bennet_A'"].get_signal_result(Signals.SUCCESS,self)
-            signal_B = self.subprotocols["bennet_B'"].get_signal_result(Signals.SUCCESS,self)
-                                                                       
-            result = {
-                "pos_A": signal_A[0],
-                "pos_B": signal_B[0],               
-                "time": sim_time() - start_time,
+            yield (self.await_signal(self.subprotocols["teleport_A"], Signals.SUCCESS) &
+                   self.await_signal(self.subprotocols["teleport_B"], Signals.SUCCESS))
+            filter1 = self.subprotocols["filter_A1"].get_signal_result(Signals.SUCCESS,self)
+            filter2 = self.subprotocols["filter_A2"].get_signal_result(Signals.SUCCESS,self)
+            bennet = self.subprotocols["bennet_A'"].get_signal_result(Signals.SUCCESS,self)
+            result_en = {
+                "runs_f1": filter1[1],
+                "runs_f2": filter2[1],
+                "runs_b": bennet[1],
                 "pairs1": self.subprotocols["entangle_A1"].entangled_pairs,
                 "pairs2": self.subprotocols["entangle_A2"].entangled_pairs,
             }
-            print(result)
-            self.send_signal(Signals.SUCCESS, result)
+            print(result_en)
+            result_A = self.subprotocols["teleport_A"].get_signal_result(Signals.SUCCESS, self)
+            result_B = self.subprotocols["teleport_B"].get_signal_result(Signals.SUCCESS, self)
+            result_tel = {
+                "pos_A0": result_A["pos_A0"],
+                "pos_A1": result_A["pos_A1"],
+                "pos_B": result_B,
+                "time": sim_time() - start_time
+            }
+            print(result_tel)
+            self.send_signal(Signals.SUCCESS, [result_en, result_tel])
             #print(f"Simulation {i}: Finish")
 
 def sim_setup(node_a, node_b, num_runs, epsilon):
-    fil_example = FilteringBennet(node_a, node_b, num_runs=num_runs, epsilon=epsilon)
+    fb_example = FilteringBennet(node_a, node_b, num_runs=num_runs, epsilon=epsilon)
 
     def record_run(evexpr):
         # Callback that collects data each run
         protocol = evexpr.triggered_events[-1].source
-        result = protocol.get_signal_result(Signals.SUCCESS)
+        result_en, result_tel = protocol.get_signal_result(Signals.SUCCESS)
         # Record fidelity
-        q_A, = node_a.qmemory.pop(positions=[result["pos_A"]])
-        q_B, = node_b.qmemory.pop(positions=[result["pos_B"]])
-        f2 = qapi.fidelity([q_A, q_B], ks.b00, squared=True)
-        prob = 1 / result["runs"]
+        node_a.qmemory.discard(positions=[result_tel["pos_A0"]]) # 使用しているメモリを解放
+        node_a.qmemory.discard(positions=[result_tel["pos_A1"]])
+        q_B, = node_b.qmemory.pop(positions=[result_tel["pos_B"]])
+        f2 = qapi.fidelity(q_B, ks.y0, squared=True)
+        pairs = result_en["pairs1"] + result_en["pairs2"]
+        #prob = 1 / result["runs"]
         #print(f"{result["time"]}: pairs = {result["pairs"]}, fidelity = {fidelity}")
-        return {"fidelity": f2, "pairs": result["pairs"], "probability": prob, "time": result["time"]}
+        return {"fidelity": f2, "pairs": pairs, "time": result_tel["time"]}
 
     dc = DataCollector(record_run, include_time_stamp=False,
                        include_entity_name=False)
-    dc.collect_on(pd.EventExpression(source=fil_example,
+    dc.collect_on(pd.EventExpression(source=fb_example,
                                      event_type=Signals.SUCCESS.value))
-    return fil_example, dc
+    return fb_example, dc
 
 def network_setup(source_delay=1e5, source_fidelity_sq=0.8, damp_rate=500,
                           node_distance=200):
@@ -203,7 +224,7 @@ def network_setup(source_delay=1e5, source_fidelity_sq=0.8, damp_rate=500,
 
 if __name__ == "__main__":
     network = network_setup()
-    fil_example = FilteringBennet(network.get_node("node_A"), network.get_node("node_B"), num_runs=1, epsilon=0.9)
-    fil_example.start()
+    fb_example, dc = sim_setup(network.get_node("node_A"), network.get_node("node_B"), num_runs=1, epsilon=0.9)
+    fb_example.start()
     ns.sim_run()
-    #print("Average fidelity of generated entanglement with filtering: {}".format(dc.dataframe["fidelity"].mean()))
+    print("Average fidelity : {}".format(dc.dataframe["fidelity"].mean()))

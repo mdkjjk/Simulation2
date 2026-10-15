@@ -5,7 +5,7 @@ import pandas
 import matplotlib, os
 from matplotlib import pyplot as plt
 from noise import AmplitudeNoiseModel, PhaseNoiseModel
-from teleportation import InitStateProgram, BellMeasurement, Correction
+from teleportation import BellMeasurement, Correction
 from wm2022 import LocalEntangle
 from wmb import Protect, RWMeasure, QuantumDispatcher
 from deutsch import Distil
@@ -116,17 +116,17 @@ class Distil(NodeProtocol):
                     self.remote_qcount, self.remote_meas_result = classical_message.items
                     print(f"{self.name}: Result received at {classical_message} / time: {sim_time()}")
             elif expr.second_term.value:
-                print(f"{self.name}: Bennett purification start / time: {sim_time()}")
+                print(f"{self.name}: Deutsch purification start / time: {sim_time()}")
 
                 # ----------------------------------------------
                 # 使用する量子ビットのメモリ位置を設定
                 # ----------------------------------------------
-                if self.role.upper() == "A":
+                if self.name == "deutsch_A":
                     self._qmem_positions = [0, 2]
                 else:
                     self._qmem_positions = [0, 1]
                 self.local_qcount += 1
-                print(f"{self.name}: Bennett qubits = {self._qmem_positions}")
+                print(f"{self.name}: Deutsch qubits = {self._qmem_positions}")
                 yield from self._node_do_DEJMPS()
             self._check_success()
 

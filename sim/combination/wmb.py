@@ -5,7 +5,7 @@ import pandas
 import matplotlib, os
 from matplotlib import pyplot as plt
 from noise import AmplitudeNoiseModel, PhaseNoiseModel
-from teleportation import InitStateProgram, BellMeasurement, Correction
+from teleportation import BellMeasurement, Correction
 from wm2022 import LocalEntangle
 from bennet import Bennet
 
@@ -428,7 +428,6 @@ class Bennet(NodeProtocol):
             # 測定結果が揃ったか確認
             # ==================================================
             self._check_success()
-            print(f"{self.name}: waiting again")
     
     def start(self):
         self._clear_qmem_positions()
@@ -561,8 +560,7 @@ class ProtectBennet(LocalProtocol):
                 result_en = {
                     "pairs1": self.subprotocols["entangle_A1"].entangled_pairs,
                     "pairs2": self.subprotocols["entangle_A2"].entangled_pairs,
-                    "runs": signal_A[1],
-                    "time": sim_time() - start_time
+                    "runs": signal_A[1]
                 }
                 result_A = self.subprotocols["teleport_A"].get_signal_result(Signals.SUCCESS, self)
                 result_B = self.subprotocols["teleport_B"].get_signal_result(Signals.SUCCESS, self)

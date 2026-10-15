@@ -208,7 +208,7 @@ class EntangleNodes(NodeProtocol):
                     if self.node.qmemory.busy:
                         yield self.await_program(self.node.qmemory)
                 self.entangled_pairs += 1
-                print(f"{self.name}: Entanglement generated at memory position {mem_pos}")
+                #print(f"{self.name}: Entanglement generated at memory position {mem_pos}")
                 self.send_signal(Signals.SUCCESS, mem_pos)
 
     @property
