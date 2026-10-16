@@ -119,7 +119,7 @@ class FilteringBennet(LocalProtocol):
                 "pairs1": self.subprotocols["entangle_A1"].entangled_pairs,
                 "pairs2": self.subprotocols["entangle_A2"].entangled_pairs,
             }
-            print(result_en)
+            #print(result_en)
             result_A = self.subprotocols["teleport_A"].get_signal_result(Signals.SUCCESS, self)
             result_B = self.subprotocols["teleport_B"].get_signal_result(Signals.SUCCESS, self)
             result_tel = {
@@ -128,7 +128,7 @@ class FilteringBennet(LocalProtocol):
                 "pos_B": result_B,
                 "time": sim_time() - start_time
             }
-            print(result_tel)
+            #print(result_tel)
             self.send_signal(Signals.SUCCESS, [result_en, result_tel])
             #print(f"Simulation {i}: Finish")
 
@@ -191,8 +191,6 @@ def network_setup(source_delay=1e5, source_fidelity_sq=0.8, damp_rate=500,
     network.add_connection(node_a, node_b, connection=conn_cchannel3, label="bemmet",
                            port_name_node1="cout_bob", port_name_node2="cin_alice")    
     
-    
-    # node_A.connect_to(node_B, conn_cchannel)
     # quantum_noise_modelに振幅減衰ノイズを指定
     # "quantum_noise_model": DepolarNoiseModel(depolar_rate=depolar_rate, time_independent=False)
     # "quantum_noise_model": AmplitudeNoiseModel(gamma=damp_rate, time_independent=False)
@@ -222,9 +220,46 @@ def network_setup(source_delay=1e5, source_fidelity_sq=0.8, damp_rate=500,
     node_b.ports[port_name_b2].forward_input(node_b.qmemory.ports["qin1"])
     return network
 
+def run_experiment_node(node_distances): # シミュレーションを実行するための関数
+    fidelity_data = pandas.DataFrame()
+    for node_distance in node_distances:
+        ns.sim_reset()
+        network = network_setup(node_distance=node_distance) # ネットワーク構築
+        node_a = network.get_node("node_A")
+        node_b = network.get_node("node_B")
+        fb_example, dc = sim_setup(node_a, node_b, 1000, epsilon=0.9) # シミュレーション設定
+        fb_example.start()
+        ns.sim_run() # シミュレーション実行
+        df = dc.dataframe
+        df['node_distance'] = node_distance
+        fidelity_data = pandas.concat([fidelity_data, df])
+    return fidelity_data
+
+
+def create_plot_node(): #グラフ表示のための関数
+    matplotlib.use('Agg')
+    node_distances = [i for i in range(10, 1000, 50)]
+    fidelities = run_experiment_node(node_distances)
+    # タイトルの固定値を変更すること
+    plot_style = {'kind': 'scatter', 'grid': True,
+                  'title': "Fidelity with filtering & bennet \n(amplitude_damp_rate=500 Hz)"}
+    data = fidelities.groupby("node_distance")['fidelity'].agg(
+        fidelity='mean', sem='sem').reset_index()
+    save_dir = "./plots_test"
+    existing_files1 = len([f for f in os.listdir(save_dir) if f.startswith("Teleportation fidelity")])
+    filename = f"{save_dir}/Filter&Bennet fidelity_{existing_files1 + 1}.png"
+    data.plot(x='node_distance', y='fidelity', yerr='sem', **plot_style)
+    plt.savefig(filename)
+    print(f"Plot saved as {filename}")
+    existing_files2 = len([f for f in os.listdir(save_dir) if f.startswith("Teleportation result")])
+    fidelities.to_csv(f"{save_dir}/Teleportation result_{existing_files2 + 1}.csv")
+    existing_files3 = len([f for f in os.listdir(save_dir) if f.startswith("Teleportation summary")])
+    data[['node_distance', 'fidelity']].to_csv(f"{save_dir}/Teleportation summary_{existing_files2 + 1}.csv")
+
 if __name__ == "__main__":
-    network = network_setup()
-    fb_example, dc = sim_setup(network.get_node("node_A"), network.get_node("node_B"), num_runs=1, epsilon=0.9)
-    fb_example.start()
-    ns.sim_run()
-    print("Average fidelity : {}".format(dc.dataframe["fidelity"].mean()))
+    #network = network_setup()
+    #fb_example, dc = sim_setup(network.get_node("node_A"), network.get_node("node_B"), num_runs=1, epsilon=0.9)
+    #fb_example.start()
+    #ns.sim_run()
+    #print("Average fidelity : {}".format(dc.dataframe["fidelity"].mean()))
+    create_plot_node()

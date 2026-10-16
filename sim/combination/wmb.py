@@ -126,12 +126,12 @@ class Protect(NodeProtocol):   # Alice側のプロトコル
         if self.remote_meas_result == 1:
             self._handle_fail()
             self.send_signal(Signals.FAIL, self.local_qcount)
-            #print(f"{self.name}: FAIL")
+            print(f"{self.name}: FAIL")
             self.local_meas_result = None
             self.remote_meas_result = None
         else:
             self.send_signal(Signals.SUCCESS, [self._qmem_positions[0], self.local_qcount])
-            #print(f"{self.name}: SUCCESS")
+            print(f"{self.name}: SUCCESS")
             self.local_qcount = 0
 
     def _handle_fail(self):
@@ -254,7 +254,7 @@ class RWMeasure(NodeProtocol):   # Bob側のプロトコル
     def _check_success(self):
         if (self.local_qcount > 0 and self.local_qcount == self.remote_qcount and
                 self.local_meas_result == 0):
-            #print(f"{self.name}: SUCCESS")
+            print(f"{self.name}: SUCCESS")
             self.send_signal(Signals.SUCCESS, self._qmem_pos[0])
             self.local_qcount = 0
             self.remote_meas_result = None
@@ -262,7 +262,7 @@ class RWMeasure(NodeProtocol):   # Bob側のプロトコル
             pass
         else:
             self._handle_fail()
-            #print(f"{self.name}: FAIL")
+            print(f"{self.name}: FAIL")
             self.send_signal(Signals.FAIL, self.local_qcount)
             self.local_meas_result = None
             self.remote_meas_result = None
@@ -393,7 +393,7 @@ class Bennet(NodeProtocol):
 
         while True:
             expr = yield cchannel_ready | qmemory_ready
-            print(f"{self.name}: first_term={expr.first_term.value}, second_term={expr.second_term.value}, time={sim_time()}")
+            #print(f"{self.name}: first_term={expr.first_term.value}, second_term={expr.second_term.value}, time={sim_time()}")
 
             # ==================================================
             # Bobから古典測定結果を受信した場合
@@ -402,13 +402,13 @@ class Bennet(NodeProtocol):
                 classical_message = self.port.rx_input(header=self.header)
                 if classical_message:
                     self.remote_qcount, self.remote_meas_result = classical_message.items
-                    print(f"{self.name}: result {classical_message.items} received")
+                    #print(f"{self.name}: result {classical_message.items} received")
 
             # ==================================================
             # Bennett精製の開始条件が成立した場合
             # ==================================================
             elif expr.second_term.value:
-                print(f"{self.name}: Bennett purification start / time: {sim_time()}")
+                #print(f"{self.name}: Bennett purification start / time: {sim_time()}")
 
                 # ----------------------------------------------
                 # 使用する量子ビットのメモリ位置を設定
@@ -418,7 +418,7 @@ class Bennet(NodeProtocol):
                 else:
                     self._qmem_positions = [0, 1]
                 self.local_qcount += 1
-                print(f"{self.name}: Bennett qubits = {self._qmem_positions}")
+                #print(f"{self.name}: Bennett qubits = {self._qmem_positions}")
 
                 # 2組のエンタングルメントを用いて
                 # Bennett型エンタングルメント精製を実行
@@ -465,12 +465,12 @@ class Bennet(NodeProtocol):
                 self.remote_meas_result is not None):
             if self.local_meas_result == self.remote_meas_result:
                 self.send_signal(Signals.SUCCESS, [self._qmem_positions[0], self.num_runs])
-                print(f"{self.name}: SUCCESS / time: {sim_time()}")
+                #print(f"{self.name}: SUCCESS / time: {sim_time()}")
                 self.num_runs = 0
             else:
                 self._clear_qmem_positions()
                 self.send_signal(Signals.FAIL, self.local_qcount)
-                print(f"{self.name}: FAIL")
+                #print(f"{self.name}: FAIL")
             self.local_meas_result = None
             self.remote_meas_result = None
             self._qmem_positions = [None, None]
@@ -587,7 +587,7 @@ def sim_setup(node_a, node_b, num_runs, omega, theta):
         pairs = result_en["pairs1"] + result_en["pairs2"]
         prob = 1 / result_en["runs"]
         f2 = qapi.fidelity(q_B, ks.y0, squared=True)
-        return {"fidelity": f2, "pairs": pairs, "probability": prob, "time": result_en["time"]}
+        return {"fidelity": f2, "pairs": pairs, "probability": prob, "time": result_tel["time"]}
 
     dc = DataCollector(record_run, include_time_stamp=False,
                         include_entity_name=False)
@@ -629,6 +629,7 @@ def network_setup(source_delay=1e5, source_fidelity_sq=0.8, depolar_rate=200, no
             ClassicalChannel("CChannel_B3->A3", length=node_distance, models={"delay_model": FibreDelayModel(c=200e3)}))
     network.add_connection(node_a, node_b, connection=conn_cchanne3, label="channel3",
                                 port_name_node1="cout_bob", port_name_node2="cin_alice")
+    
     # quantum_noise_modelに振幅減衰ノイズを指定
     # "quantum_noise_model": DepolarNoiseModel(depolar_rate=depolar_rate, time_independent=False)
     # "quantum_noise_model": AmplitudeNoiseModel(gamma=damp_rate, time_independent=False)
