@@ -8,7 +8,6 @@ from noise import AmplitudeNoiseModel, PhaseNoiseModel
 from teleportation import BellMeasurement, Correction
 from wm2022 import LocalEntangle
 from wmb import Protect, RWMeasure, QuantumDispatcher
-from deutsch import Distil
 
 from netsquid.qubits import operators as ops
 from netsquid.qubits import qubitapi as qapi

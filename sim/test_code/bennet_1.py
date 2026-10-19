@@ -14,7 +14,8 @@ def create_bell_state():
     assign_qstate(qB, ketstates.s0)  # |1⟩
     operate(qA, ns.H)                # Hadamard on qA
     operate([qA, qB], ns.CX)         # CNOT
-    #operate(qA, ns.Z)                # To get |Ψ⁻⟩ from |Ψ⁺⟩
+    #operate(qB, ns.Z)                # To get |Ψ⁻⟩ from |Ψ⁺⟩
+    #operate(qB, ns.X)
     return qA, qB
 
 # Werner状態の作成
@@ -38,6 +39,7 @@ print(fidelity([qC, qD], ketstates.b00))    # 初期忠実度
 # 各サイドで、CNOTゲートを適用
 operate([qC, qA], ns.CX)
 operate([qD, qB], ns.CX)
+print(qubitapi.reduced_dm([qC, qD]))
 # 各サイドで、ターゲットビットをZ軸で測定
 ma = measure(qA, discard=True)
 mb = measure(qB, discard=True)
