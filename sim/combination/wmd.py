@@ -39,29 +39,6 @@ from pydynaa import EventExpression
 ns.set_qstate_formalism(QFormalism.DM)
 
 class Distil(NodeProtocol):
-    """Protocol that does local DEJMPS distillation on a node.
-
-    This is done in combination with another node.
-
-    Parameters
-    ----------
-    node : :py:class:`~netsquid.nodes.node.Node`
-        Node with a quantum memory to run protocol on.
-    port : :py:class:`~netsquid.components.component.Port`
-        Port to use for classical IO communication to the other node.
-    role : "A" or "B"
-        Distillation requires that one of the nodes ("B") conjugate its rotation,
-        while the other doesn't ("A").
-    start_expression : :class:`~pydynaa.EventExpression`
-        EventExpression node should wait for before starting distillation.
-        The EventExpression should have a protocol as source, this protocol should signal the quantum memory position
-        of the qubit.
-    msg_header : str, optional
-        Value of header meta field used for classical communication.
-    name : str or None, optional
-        Name of protocol. If None a default name is set.
-
-    """
     # set basis change operators for local DEJMPS step
     _INSTR_Rx = IGate("Rx_gate", ops.create_rotation_op(np.pi / 2, (1, 0, 0)))
     _INSTR_RxC = IGate("RxC_gate", ops.create_rotation_op(np.pi / 2, (1, 0, 0), conjugate=True))
@@ -113,9 +90,9 @@ class Distil(NodeProtocol):
                 classical_message = self.port.rx_input(header=self.header)
                 if classical_message:
                     self.remote_qcount, self.remote_meas_result = classical_message.items
-                    print(f"{self.name}: Result received at {classical_message} / time: {sim_time()}")
+                    #print(f"{self.name}: Result received at {classical_message} / time: {sim_time()}")
             elif expr.second_term.value:
-                print(f"{self.name}: Deutsch purification start / time: {sim_time()}")
+                #print(f"{self.name}: Deutsch purification start / time: {sim_time()}")
 
                 # ----------------------------------------------
                 # 使用する量子ビットのメモリ位置を設定
@@ -125,7 +102,7 @@ class Distil(NodeProtocol):
                 else:
                     self._qmem_positions = [0, 1]
                 self.local_qcount += 1
-                print(f"{self.name}: Deutsch qubits = {self._qmem_positions}")
+                #print(f"{self.name}: Deutsch qubits = {self._qmem_positions}")
                 yield from self._node_do_DEJMPS()
             self._check_success()
 
@@ -171,14 +148,14 @@ class Distil(NodeProtocol):
             if self.local_meas_result == self.remote_meas_result:
                 # SUCCESS
                 self.send_signal(Signals.SUCCESS, [self._qmem_positions[0], self.num_runs])
-                print(f"{self.name}: SUCCESS / time: {sim_time()}")
+                #print(f"{self.name}: SUCCESS / time: {sim_time()}")
                 self.num_runs = 0
                 self.local_qcount = 0
             else:
                 # FAILURE
                 self._clear_qmem_positions()
                 self.send_signal(Signals.FAIL, self.local_qcount)
-                print(f"{self.name}: FAIL / time: {sim_time()}")
+                #print(f"{self.name}: FAIL / time: {sim_time()}")
             self.local_meas_result = None
             self.remote_meas_result = None
             self._qmem_positions = [None, None]
@@ -288,7 +265,7 @@ def sim_setup(node_a, node_b, num_runs, omega, theta):
         # Callback that collects data each run
         protocol = evexpr.triggered_events[-1].source
         result_en, result_tel = protocol.get_signal_result(Signals.SUCCESS)
-        print(result_en)
+        #print(result_en)
         node_a.qmemory.discard(positions=[result_tel["pos_A0"]]) # 使用しているメモリを解放
         node_a.qmemory.discard(positions=[result_tel["pos_A1"]])
         q_B, = node_b.qmemory.pop(positions=[result_tel["pos_B"]])
@@ -367,9 +344,95 @@ def network_setup(source_delay=1e5, source_fidelity_sq=0.8, depolar_rate=200, no
     )
     return network
 
+def run_experiment(var_o, var_t):
+    fidelity_data = pandas.DataFrame()
+    for omega in var_o:
+        for theta in var_t:
+            ns.sim_reset()
+            network = network_setup()
+            node_a = network.get_node("node_A")
+            node_b = network.get_node("node_B")
+            pro_example, dc = sim_setup(node_a, node_b, 1000, omega, theta)
+            pro_example.start()
+            ns.sim_run()
+            df = dc.dataframe
+            df['omega'] = omega
+            df['theta'] = theta
+            fidelity_data = pandas.concat([fidelity_data, df])
+    return fidelity_data
+
+def save_heatmap(dataframe, value_col, title, colorbar_label, filename_prefix, var_o, var_t):
+    data = dataframe.groupby(["omega", "theta"])[value_col].mean().reset_index()
+    heatmap_data = data.pivot(index='theta', columns='omega', values=value_col)
+    plt.figure(figsize=(8, 6))
+    im = plt.imshow(heatmap_data, origin='lower', aspect='auto',
+                    extent=[
+                        min(var_o), max(var_o),
+                        min(var_t), max(var_t)
+                    ]
+    )
+    plt.colorbar(im, label=colorbar_label)
+    plt.xlabel(r'WM strength $\omega$')
+    plt.ylabel(r'WMR strength $\theta$')
+    plt.title(title)
+    save_dir = "./plots_test"
+    count1 = len([f for f in os.listdir(save_dir) if f.startswith(filename_prefix)])
+    filename = f"{save_dir}/{filename_prefix}_{count1 + 1}.png"
+    plt.savefig(filename)
+    plt.close()
+    if value_col == "fidelity":
+        max_fid = data["fidelity"].max()
+        best_rows = data[data["fidelity"] == max_fid]
+        print("Optimal value is")
+        print(best_rows)
+    print(f"Plot saved as {filename}")
+    count2 = len([f for f in os.listdir(save_dir)
+                if f.startswith(value_col + " summary")])
+    data[['omega', 'theta', value_col]].to_csv(f"{save_dir}/{value_col} summary_{count2 + 1}.csv")
+
+def create_plot():
+    matplotlib.use('Agg')
+    var_o = [i for i in np.arange(0.0, np.pi/2, np.pi/14)]
+    var_t = [i for i in np.arange(0.0, 1.0, 0.1)]
+    datas = run_experiment(var_o, var_t)
+    # 忠実度
+    save_heatmap(
+        datas,
+        value_col="fidelity",
+        title="Fidelity Heatmap with protection\n(depolar_rate=100 Hz, node_distance=10 km)",
+        colorbar_label="Average Fidelity",
+        filename_prefix="Protect&Deutsch fidelity",
+        var_o=var_o,
+        var_t=var_t
+    )
+    # 成功確率
+    save_heatmap(
+        datas,
+        value_col="probability",
+        title="Success Probability Heatmap with protection\n(depolar_rate=100 Hz, node_distance=10 km)",
+        colorbar_label="Average Success Probability",
+        filename_prefix="Protect&Deutsch probability",
+        var_o=var_o,
+        var_t=var_t
+    )
+    # エンタングルメントペア消費数
+    save_heatmap(
+        datas,
+        value_col="pairs",
+        title="Entanglement Pair Usage Heatmap with protection\n(depolar_rate=100 Hz, node_distance=10 km)",
+        colorbar_label="Average Number of Pairs",
+        filename_prefix="Protect&Deutsch pairs",
+        var_o=var_o,
+        var_t=var_t
+    )
+    save_dir = "./plots_test"
+    count = len([f for f in os.listdir(save_dir) if f.startswith("Protect&Deutsch result")])
+    datas.to_csv(f"{save_dir}/Protect&Deutsch result_{count + 1}.csv")
+
 if __name__ == "__main__":
-    network = network_setup()
-    pb_example, dc = sim_setup(network.get_node("node_A"), network.get_node("node_B"), 3, np.pi/3, 0.2)
-    pb_example.start()
-    ns.sim_run()
-    print("Fidelity of generated entanglement: {}".format(dc.dataframe["fidelity"].mean()))
+    #network = network_setup()
+    #pb_example, dc = sim_setup(network.get_node("node_A"), network.get_node("node_B"), 3, np.pi/3, 0.2)
+    #pb_example.start()
+    #ns.sim_run()
+    #print("Fidelity of generated entanglement: {}".format(dc.dataframe["fidelity"].mean()))
+    create_plot()

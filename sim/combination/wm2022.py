@@ -326,7 +326,6 @@ def network_setup(source_delay=1e5, source_fidelity_sq=0.8, depolar_rate=100, no
     node_a.add_subcomponent(QuantumProcessor("QuantumMemory_A", num_positions=6,
         fallback_to_nonphysical=True))   # パラメータ「memory_noise_models」によりメモリ滞在によるノイズの影響を設定可能
     state_sampler = StateSampler([ks.b00, ks.s00], probabilities=[source_fidelity_sq, 1 - source_fidelity_sq])
-    source_frequency = 4e4 / node_distance
     node_a.add_subcomponent(QSource("QSource_A", state_sampler=state_sampler,
         models={"emission_delay_model": FixedDelayModel(delay=source_delay)},
         num_ports=2, status=SourceStatus.EXTERNAL))

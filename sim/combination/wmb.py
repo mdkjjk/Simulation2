@@ -78,7 +78,7 @@ class Protect(NodeProtocol):   # Alice側のプロトコル
                 source_protocol = expr.second_term.atomic_source
                 ready_signal = source_protocol.get_signal_by_event(
                         event=expr.second_term.triggered_events[0], receiver=self) # エンタングルメントが保存されたメモリポジションを取得
-                #print(f"{self.name}: Entanglement received at {ready_signal.result} / time: {sim_time()}")      
+                print(f"{self.name}: Entanglement received at {ready_signal.result} / time: {sim_time()}")      
                 self._qmem_positions[0] = ready_signal.result["mem_pos0"]
                 self._qmem_positions[1] = ready_signal.result["mem_pos1"]
                 yield from self._handle_qubit_rx()
@@ -745,9 +745,9 @@ def create_plot():
     datas.to_csv(f"{save_dir}/Protect&Bennet result_{count + 1}.csv")
 
 if __name__ == "__main__":
-    #network = network_setup()
-    #pb_example, dc = sim_setup(network.get_node("node_A"), network.get_node("node_B"), 3, np.pi/3, 0.2)
-    #pb_example.start()
-    #ns.sim_run()
-    #print("Fidelity of generated entanglement: {}".format(dc.dataframe["fidelity"].mean()))
-    create_plot()
+    network = network_setup()
+    pb_example, dc = sim_setup(network.get_node("node_A"), network.get_node("node_B"), 3, np.pi/3, 0.2)
+    pb_example.start()
+    ns.sim_run()
+    print("Fidelity of generated entanglement: {}".format(dc.dataframe["fidelity"].mean()))
+    #create_plot()

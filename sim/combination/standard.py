@@ -72,7 +72,7 @@ class Example(LocalProtocol): # シミュレーション全体のプロトコル
             #print(f"Simulation {i} Finish")
 
 
-def example_network_setup(source_delay=1e5, source_fidelity_sq=0.8, depolar_rate=500,
+def example_network_setup(source_delay=1e5, source_fidelity_sq=0.8, depolar_rate=0,
                           node_distance=200): # 量子ネットワークの構築
     network = Network("network")
 
@@ -162,7 +162,7 @@ def create_plot_node(): #グラフ表示のための関数
                   'title': "Fidelity of the teleported quantum state\n(depolar_rate=500 Hz)"}
     data = fidelities.groupby("node_distance")['fidelity'].agg(
         fidelity='mean', sem='sem').reset_index()
-    save_dir = "./plots_test/standard/node_distance/depolar"
+    save_dir = "./plots_test"
     existing_files1 = len([f for f in os.listdir(save_dir) if f.startswith("Teleportation fidelity")])
     filename = f"{save_dir}/Teleportation fidelity_{existing_files1 + 1}.png"
     data.plot(x='node_distance', y='fidelity', yerr='sem', **plot_style)
