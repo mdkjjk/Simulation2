@@ -263,14 +263,13 @@ class DistilExample(LocalProtocol):
             #print(f"Simulation {i}: Finish")
 
 
-def network_setup(source_delay=1e5, source_fidelity_sq=0.8, damp_rate=500,
+def network_setup(source_delay=1e5, source_fidelity_sq=1.0, damp_rate=500,
                           node_distance=200):
     network = Network("network")
 
     node_a, node_b = network.add_nodes(["node_A", "node_B"])
     node_a.add_subcomponent(QuantumProcessor(
-        "QuantumMemory_A", num_positions=6, fallback_to_nonphysical=True,
-        memory_noise_models=DepolarNoiseModel(0)))
+        "QuantumMemory_A", num_positions=6, fallback_to_nonphysical=True))
     state_sampler = StateSampler([ks.b00, ks.s00],
         probabilities=[source_fidelity_sq, 1 - source_fidelity_sq])
     node_a.add_subcomponent(QSource(
@@ -278,8 +277,7 @@ def network_setup(source_delay=1e5, source_fidelity_sq=0.8, damp_rate=500,
         models={"emission_delay_model": FixedDelayModel(delay=source_delay)},
         num_ports=2, status=SourceStatus.EXTERNAL))
     node_b.add_subcomponent(QuantumProcessor(
-        "QuantumMemory_B", num_positions=6, fallback_to_nonphysical=True,
-        memory_noise_models=DepolarNoiseModel(0)))
+        "QuantumMemory_B", num_positions=6, fallback_to_nonphysical=True))
 
     conn_cchannel = DirectConnection("CChannelConn_AB",
         ClassicalChannel("CChannel_A->B", length=node_distance,

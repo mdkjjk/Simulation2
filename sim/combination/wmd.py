@@ -281,7 +281,7 @@ def sim_setup(node_a, node_b, num_runs, omega, theta):
                                         event_type=Signals.SUCCESS.value))
     return pb_example, dc
 
-def network_setup(source_delay=1e5, source_fidelity_sq=0.8, depolar_rate=200, node_distance=200):
+def network_setup(source_delay=1e5, source_fidelity_sq=1.0, depolar_rate=200, node_distance=200):
     network = Network("wmeasure_network")
 
     # ノード設定
@@ -289,7 +289,6 @@ def network_setup(source_delay=1e5, source_fidelity_sq=0.8, depolar_rate=200, no
     node_a.add_subcomponent(QuantumProcessor("QuantumMemory_A", num_positions=6,
         fallback_to_nonphysical=True))   # パラメータ「memory_noise_models」によりメモリ滞在によるノイズの影響を設定可能
     state_sampler = StateSampler([ks.b00, ks.s00], probabilities=[source_fidelity_sq, 1 - source_fidelity_sq])
-    source_frequency = 4e4 / node_distance
     node_a.add_subcomponent(QSource("QSource_A1", state_sampler=state_sampler,
         models={"emission_delay_model": FixedDelayModel(delay=source_delay)},
         num_ports=2, status=SourceStatus.EXTERNAL))

@@ -72,7 +72,7 @@ class Example(LocalProtocol): # シミュレーション全体のプロトコル
             #print(f"Simulation {i} Finish")
 
 
-def example_network_setup(source_delay=1e5, source_fidelity_sq=0.8, depolar_rate=0,
+def example_network_setup(source_delay=1e5, source_fidelity_sq=1.0, depolar_rate=0,
                           node_distance=200): # 量子ネットワークの構築
     network = Network("network")
 
@@ -81,8 +81,7 @@ def example_network_setup(source_delay=1e5, source_fidelity_sq=0.8, depolar_rate
     # ノードA: QuantumProcessor(量子メモリ), QSource(量子ソース)
     # ノードB: QuantumProcessor(量子メモリ)
     node_a.add_subcomponent(QuantumProcessor(
-        "QuantumMemory_A", num_positions=6, fallback_to_nonphysical=True,
-        memory_noise_models=DepolarNoiseModel(0))) # メモリ数や、メモリに働くノイズを設定可能
+        "QuantumMemory_A", num_positions=6, fallback_to_nonphysical=True)) # メモリ数や、メモリに働くノイズを設定可能
     state_sampler = StateSampler([ks.b00, ks.s00],
         probabilities=[source_fidelity_sq, 1 - source_fidelity_sq]) # 量子ソースで生成される量子状態の設定
     node_a.add_subcomponent(QSource(
@@ -90,8 +89,7 @@ def example_network_setup(source_delay=1e5, source_fidelity_sq=0.8, depolar_rate
         models={"emission_delay_model": FixedDelayModel(delay=source_delay)},
         num_ports=2, status=SourceStatus.EXTERNAL))
     node_b.add_subcomponent(QuantumProcessor(
-        "QuantumMemory_B", num_positions=6, fallback_to_nonphysical=True,
-        memory_noise_models=DepolarNoiseModel(0)))
+        "QuantumMemory_B", num_positions=6, fallback_to_nonphysical=True))
 
     # 古典チャネルを接続
     cchannel = DirectConnection("CChannelConn_tel", ClassicalChannel("CChannel_dis_A->B", length=node_distance,

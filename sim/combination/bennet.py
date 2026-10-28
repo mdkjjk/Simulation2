@@ -181,7 +181,7 @@ class Bennet(NodeProtocol):
             return False
         return True
 
-def network_setup(source_delay=1e5, source_fidelity_sq=0.8, damp_rate=500, node_distance=200):
+def network_setup(source_delay=1e5, source_fidelity_sq=1.0, damp_rate=500, node_distance=200):
     network = Network("bennet_network")
 
     # ノード設定

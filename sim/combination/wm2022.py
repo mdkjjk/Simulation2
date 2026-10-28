@@ -186,6 +186,7 @@ class Protect(NodeProtocol):   # Alice側のプロトコル
                 yield self.await_program(self.node.qmemory)
             self.node.qmemory.execute_instruction(INSTR_X, [pos2])
         qubit = self.node.qmemory.pop(positions=pos2)
+        #print(f"{self.name}: Entanglement send / time: {sim_time()}")
         #print(f"{self.name}: {self.node.qmemory.used_positions}")
         self._qmem_positions[1] = None
         #self._check_success()
@@ -256,7 +257,7 @@ class RWMeasure(NodeProtocol):   # Bob側のプロトコル
             elif expr.second_term.value:
                 #print(f"{self.name}: {self.node.qmemory.used_positions}")
                 self._qmem_pos = self.node.qmemory.used_positions
-                #print(f"{self.name}: Entanglement arrived at {self._qmem_pos}")
+                #print(f"{self.name}: Entanglement arrived at {self._qmem_pos} / time: {sim_time()}")
                 #print(f"{self.name}: Remote result = {self.remote_meas_result}")
                 if self.remote_meas_result is not None:
                     yield from self._handle_qubit_rx()
@@ -318,7 +319,7 @@ class RWMeasure(NodeProtocol):   # Bob側のプロトコル
 
         
 
-def network_setup(source_delay=1e5, source_fidelity_sq=0.8, depolar_rate=100, node_distance=10):
+def network_setup(source_delay=1e5, source_fidelity_sq=1.0, depolar_rate=100, node_distance=200):
     network = Network("wmeasure_network")
 
     # ノード設定

@@ -78,7 +78,7 @@ class Protect(NodeProtocol):   # Alice側のプロトコル
                 source_protocol = expr.second_term.atomic_source
                 ready_signal = source_protocol.get_signal_by_event(
                         event=expr.second_term.triggered_events[0], receiver=self) # エンタングルメントが保存されたメモリポジションを取得
-                print(f"{self.name}: Entanglement received at {ready_signal.result} / time: {sim_time()}")      
+                #print(f"{self.name}: Entanglement received at {ready_signal.result} / time: {sim_time()}")      
                 self._qmem_positions[0] = ready_signal.result["mem_pos0"]
                 self._qmem_positions[1] = ready_signal.result["mem_pos1"]
                 yield from self._handle_qubit_rx()
@@ -113,6 +113,7 @@ class Protect(NodeProtocol):   # Alice側のプロトコル
                      "protocol": self.name,
                      "mem_pos": pos2}
         self.node.qmemory.pop(positions=pos2, meta_data=meta_data)
+        #print(f"{self.name}: Entanglement send / time: {sim_time()}")
         #print(f"{self.name}: {self.node.qmemory.used_positions}")
         self._qmem_positions[1] = None
 
@@ -210,7 +211,7 @@ class RWMeasure(NodeProtocol):   # Bob側のプロトコル
                     continue
 
                 self._qmem_pos = [bob_mem_pos]
-                #print(f"{self.name}: Entanglement arrived at Bob qmemory position {self._qmem_pos}")
+                #print(f"{self.name}: Entanglement arrived at Bob qmemory position {self._qmem_pos} / time: {sim_time()}")
 
                 # Alice側の測定結果を受信済みなら
                 # weak measurementを実行
@@ -283,6 +284,7 @@ class QuantumDispatcher(NodeProtocol):
         while True:
             # Aliceから量子ビットが届くまで待つ
             yield self.await_port_input(self.port_in)
+            #print(f"{self.name}: Port input entanglement / time: {sim_time()}")
             msg = self.port_in.rx_input()
 
             if msg is None:
@@ -326,7 +328,7 @@ class QuantumDispatcher(NodeProtocol):
             qubits = msg.items
 
             self.node.qmemory.put(qubits, positions=[bob_mem_pos])
-            #print(f"{self.name}: Qubit stored at Bob qmemory[{bob_mem_pos}]")
+            #print(f"{self.name}: Qubit stored at Bob qmemory[{bob_mem_pos}] / time: {sim_time()}")
 
             # ==================================================
             # RWMeasureへ到着通知
@@ -595,7 +597,7 @@ def sim_setup(node_a, node_b, num_runs, omega, theta):
                                         event_type=Signals.SUCCESS.value))
     return pb_example, dc
 
-def network_setup(source_delay=1e5, source_fidelity_sq=0.8, depolar_rate=200, node_distance=200):
+def network_setup(source_delay=1e5, source_fidelity_sq=1.0, depolar_rate=200, node_distance=200):
     network = Network("wmeasure_network")
 
     # ノード設定
@@ -603,7 +605,6 @@ def network_setup(source_delay=1e5, source_fidelity_sq=0.8, depolar_rate=200, no
     node_a.add_subcomponent(QuantumProcessor("QuantumMemory_A", num_positions=6,
         fallback_to_nonphysical=True))   # パラメータ「memory_noise_models」によりメモリ滞在によるノイズの影響を設定可能
     state_sampler = StateSampler([ks.b00, ks.s00], probabilities=[source_fidelity_sq, 1 - source_fidelity_sq])
-    source_frequency = 4e4 / node_distance
     node_a.add_subcomponent(QSource("QSource_A1", state_sampler=state_sampler,
         models={"emission_delay_model": FixedDelayModel(delay=source_delay)},
         num_ports=2, status=SourceStatus.EXTERNAL))
@@ -746,7 +747,7 @@ def create_plot():
 
 if __name__ == "__main__":
     network = network_setup()
-    pb_example, dc = sim_setup(network.get_node("node_A"), network.get_node("node_B"), 3, np.pi/3, 0.2)
+    pb_example, dc = sim_setup(network.get_node("node_A"), network.get_node("node_B"), 1, np.pi/3, 0.2)
     pb_example.start()
     ns.sim_run()
     print("Fidelity of generated entanglement: {}".format(dc.dataframe["fidelity"].mean()))
