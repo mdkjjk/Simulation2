@@ -5,7 +5,7 @@ import pandas
 import matplotlib, os
 from matplotlib import pyplot as plt
 from noise import AmplitudeNoiseModel, PhaseNoiseModel
-from teleportation import InitStateProgram, BellMeasurement, Correction
+from teleportation import BellMeasurement, Correction
 
 from netsquid.qubits import operators as ops
 from netsquid.qubits import qubitapi as qapi
@@ -143,11 +143,11 @@ class Bennet(NodeProtocol):
         pos1, pos2 = self._qmem_positions
         if self.node.qmemory.busy:
             yield self.await_program(self.node.qmemory)
-        if self.role.upper() == "A":   # Aliceの場合、回転操作を行う
-            yield self.node.qmemory.execute_program(self._rotprog, [pos1, pos2])
+        #if self.role.upper() == "A":   # Aliceの場合、回転操作を行う
+            #yield self.node.qmemory.execute_program(self._rotprog, [pos1, pos2])
         yield self.node.qmemory.execute_program(self._measprog, [pos1, pos2])   # 測定
-        if self.role.upper() == "A":   # Aliceの場合、回転操作を行う
-            yield self.node.qmemory.execute_program(self._reprog, [pos2])
+        #if self.role.upper() == "A":   # Aliceの場合、回転操作を行う
+            #yield self.node.qmemory.execute_program(self._reprog, [pos2])
         self.local_meas_result = self._measprog.output["M"][0]
         self._qmem_positions[0] = None
         self.port.tx_output(Message([self.local_qcount, self.local_meas_result],
@@ -188,7 +188,7 @@ def network_setup(source_delay=1e5, source_fidelity_sq=1.0, damp_rate=500, node_
     node_a, node_b = network.add_nodes(["node_A", "node_B"])
     node_a.add_subcomponent(QuantumProcessor("QuantumMemory_A", num_positions=6,
         fallback_to_nonphysical=True))   # パラメータ「memory_noise_models」によりメモリ滞在によるノイズの影響を設定可能
-    state_sampler = StateSampler([ks.b11, ks.s00], probabilities=[source_fidelity_sq, 1 - source_fidelity_sq])
+    state_sampler = StateSampler([ks.b00, ks.s00], probabilities=[source_fidelity_sq, 1 - source_fidelity_sq])
     node_a.add_subcomponent(QSource("QSource_A", state_sampler=state_sampler,
         models={"emission_delay_model": FixedDelayModel(delay=source_delay)},
         num_ports=2, status=SourceStatus.EXTERNAL))
