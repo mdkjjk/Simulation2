@@ -8,12 +8,9 @@ from noise import AmplitudeNoiseModel, PhaseNoiseModel
 from teleportation import BellMeasurement, Correction
 
 # 必要となるパッケージのインポート
-import netsquid.components.instructions as instr
 from netsquid.components import ClassicalChannel, QuantumChannel
-from netsquid.components.component import Message
 from netsquid.components.qsource import QSource, SourceStatus
 from netsquid.components.qprocessor import QuantumProcessor
-from netsquid.components.qprogram import QuantumProgram
 from netsquid.components.models.delaymodels import FixedDelayModel, FibreDelayModel
 from netsquid.components.models import DepolarNoiseModel
 from netsquid.util.simtools import sim_time
@@ -22,12 +19,11 @@ from netsquid.qubits import qubitapi as qapi
 from netsquid.qubits import ketstates as ks
 from netsquid.qubits.state_sampler import StateSampler
 from netsquid.qubits.qformalism import QFormalism
-from netsquid.protocols.nodeprotocols import NodeProtocol, LocalProtocol
+from netsquid.protocols.nodeprotocols import LocalProtocol
 from netsquid.protocols.protocol import Signals
 from netsquid.nodes.network import Network
 from netsquid.nodes.connections import DirectConnection
 from netsquid.examples.entanglenodes import EntangleNodes
-from pydynaa import EventExpression
 
 ns.set_qstate_formalism(QFormalism.DM)
 
@@ -64,24 +60,22 @@ class Example(LocalProtocol): # シミュレーション全体のプロトコル
                 "pos_A0": result_A["pos_A0"],
                 "pos_A1": result_A["pos_A1"],
                 "pos_B": signal_B,
+                "pairs": self.subprotocols["entangle_A"].entangled_pairs,
                 "time": sim_time() - start_time,
             }
             self.send_signal(Signals.SUCCESS, result) # プロトコルの成功シグナルと使用しているメモリポジションを送信
             #print(f"Simulation {i} Finish")
 
 
-def example_network_setup(source_delay=1e5, source_fidelity_sq=1.0, depolar_rate=200,
+def example_network_setup(source_delay=1e5, source_fidelity_sq=1.0, depolar_rate=100,
                           node_distance=200): # 量子ネットワークの構築
     network = Network("network")
 
-    node_a, node_b = network.add_nodes(["node_A", "node_B"]) # ノードの追加
-    # 各ノードにコンポーネントを追加
-    # ノードA: QuantumProcessor(量子メモリ), QSource(量子ソース)
-    # ノードB: QuantumProcessor(量子メモリ)
+    node_a, node_b = network.add_nodes(["node_A", "node_B"])
     node_a.add_subcomponent(QuantumProcessor(
-        "QuantumMemory_A", num_positions=6, fallback_to_nonphysical=True)) # メモリ数や、メモリに働くノイズを設定可能
+        "QuantumMemory_A", num_positions=6, fallback_to_nonphysical=True))   # メモリ数や、メモリに働くノイズを設定可能
     state_sampler = StateSampler([ks.b00, ks.s00],
-        probabilities=[source_fidelity_sq, 1 - source_fidelity_sq]) # 量子ソースで生成される量子状態の設定
+        probabilities=[source_fidelity_sq, 1 - source_fidelity_sq])   # 量子ソースで生成される量子状態の設定
     node_a.add_subcomponent(QSource(
         "QSource_A", state_sampler=state_sampler,
         models={"emission_delay_model": FixedDelayModel(delay=source_delay)},
@@ -124,7 +118,8 @@ def example_sim_setup(node_a, node_b, num_runs): # シミュレーションの�
         node_a.qmemory.pop(positions=[result["pos_A1"]])
         q_B, = node_b.qmemory.pop(positions=[result["pos_B"]])
         f2 = qapi.fidelity(q_B, ks.y0, squared=True) # 忠実度の計算
-        return {"fidelity": f2, "time": result["time"]}
+        prob = 1.0 / result["pairs"]
+        return {"fidelity": f2, "probability": prob, "pairs": result["pairs"], "time": result["time"]}
 
     dc = DataCollector(record_run, include_time_stamp=False,
                        include_entity_name=False)
@@ -155,32 +150,33 @@ def create_plot_node(): #グラフ表示のための関数
     fidelities = run_experiment_node(node_distances)
     # タイトルの固定値を変更すること
     plot_style = {'kind': 'scatter', 'grid': True,
-                  'title': "Fidelity of the teleported quantum state\n(depolar_rate=500 Hz)"}
+                  'title': "Fidelity of the teleported quantum state\n(amplitude_damp_rate=100 Hz)"}
     data = fidelities.groupby("node_distance")['fidelity'].agg(
         fidelity='mean', sem='sem').reset_index()
-    save_dir = "./plots_test"
+    save_dir = "./plots/original/node_distance/amplitude"
     existing_files1 = len([f for f in os.listdir(save_dir) if f.startswith("Teleportation fidelity")])
     filename = f"{save_dir}/Teleportation fidelity_{existing_files1 + 1}.png"
-    data.plot(x='node_distance', y='fidelity', yerr='sem', **plot_style)
+    data.plot(x='node_distance', y='fidelity', yerr='sem',
+              xlabel='node_distance [km]', **plot_style)
     plt.savefig(filename)
     print(f"Plot saved as {filename}")
     existing_files2 = len([f for f in os.listdir(save_dir) if f.startswith("Teleportation result")])
     fidelities.to_csv(f"{save_dir}/Teleportation result_{existing_files2 + 1}.csv")
     existing_files3 = len([f for f in os.listdir(save_dir) if f.startswith("Teleportation summary")])
-    data[['node_distance', 'fidelity']].to_csv(f"{save_dir}/Teleportation summary_{existing_files2 + 1}.csv")
+    data[['node_distance', 'fidelity']].to_csv(f"{save_dir}/Teleportation summary_{existing_files3 + 1}.csv")
 
 def run_experiment_noise(noise_rate):   # シミュレーションを実行するための関数
     fidelity_data = pandas.DataFrame()
     for noise in noise_rate:
         ns.sim_reset()
-        network = example_network_setup(damp_rate=noise)   # depolar_rate or damp_rate
+        network = example_network_setup(depolar_rate=noise)   # depolar_rate or damp_rate
         node_a = network.get_node("node_A")
         node_b = network.get_node("node_B")
         example, dc = example_sim_setup(node_a, node_b, 1000)   # シミュレーション設定
         example.start()
         ns.sim_run() # シミュレーション実行
         df = dc.dataframe
-        df['damp_rate'] = noise   # depolar_rate or damp_rate
+        df['depolar_rate'] = noise   # depolar_rate or damp_rate
         fidelity_data = pandas.concat([fidelity_data, df])
     return fidelity_data
 
@@ -191,18 +187,18 @@ def create_plot_noise(): #グラフ表示のための関数
     # タイトルの固定値を変更すること
     plot_style = {'kind': 'scatter', 'grid': True,
                   'title': "Fidelity of the teleported quantum state\n(node_distance=200 km)"}
-    data = fidelities.groupby("damp_rate")['fidelity'].agg(
+    data = fidelities.groupby("depolar_rate")['fidelity'].agg(
         fidelity='mean', sem='sem').reset_index()
-    save_dir = "./plots_test/standard/noise/phase"
+    save_dir = "./plots/original/noise/depolar"
     existing_files1 = len([f for f in os.listdir(save_dir) if f.startswith("Teleportation fidelity")])
     filename = f"{save_dir}/Teleportation fidelity_{existing_files1 + 1}.png"
-    data.plot(x='damp_rate', y='fidelity', yerr='sem', **plot_style)
+    data.plot(x='depolar_rate', y='fidelity', yerr='sem', xlabel='depolar_rate [Hz]', **plot_style)
     plt.savefig(filename)
     print(f"Plot saved as {filename}")
     existing_files2 = len([f for f in os.listdir(save_dir) if f.startswith("Teleportation result")])
     fidelities.to_csv(f"{save_dir}/Teleportation result_{existing_files2 + 1}.csv")
     existing_files3 = len([f for f in os.listdir(save_dir) if f.startswith("Teleportation summary")])
-    data[['damp_rate', 'fidelity']].to_csv(f"{save_dir}/Teleportation summary{existing_files2 + 1}.csv")
+    data[['depolar_rate', 'fidelity']].to_csv(f"{save_dir}/Teleportation summary{existing_files3 + 1}.csv")
 
 if __name__ == "__main__":
     #network = example_network_setup()
@@ -210,4 +206,4 @@ if __name__ == "__main__":
     #example.start()
     #ns.sim_run()
     #print("Average fidelity of received qubit: {}".format(dc.dataframe["fidelity"].mean()))
-    create_plot_node()
+    create_plot_noise()
