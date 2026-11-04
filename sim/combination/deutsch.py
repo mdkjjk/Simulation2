@@ -6,9 +6,8 @@ import pandas
 import matplotlib, os
 from matplotlib import pyplot as plt
 from noise import AmplitudeNoiseModel, PhaseNoiseModel
-from teleportation import InitStateProgram, BellMeasurement, Correction
+from teleportation import BellMeasurement, Correction
 
-import netsquid.components.instructions as instr
 from netsquid.components import ClassicalChannel, QuantumChannel
 from netsquid.components.instructions import INSTR_MEASURE, INSTR_CNOT, IGate
 from netsquid.components.component import Message, Port
@@ -222,17 +221,20 @@ class DistilExample(LocalProtocol):
         self.add_subprotocol(Distil(node_b, node_b.ports["cin_alice"], role="B", name="purify_B"))
         self.add_subprotocol(BellMeasurement(node=node_a, port=node_a.ports["cout_bob"], name="teleport_A"))
         self.add_subprotocol(Correction(node=node_b, name="teleport_B"))
+        
         self.subprotocols["purify_A"].start_expression = (
             self.subprotocols["purify_A"].await_signal(self.subprotocols["entangle_A"],
                                                        Signals.SUCCESS))
         self.subprotocols["purify_B"].start_expression = (
             self.subprotocols["purify_B"].await_signal(self.subprotocols["entangle_B"],
                                                        Signals.SUCCESS))
+        
         start_expr_ent_A = (self.subprotocols["entangle_A"].await_signal(
                             self.subprotocols["purify_A"], Signals.FAIL) |
                             self.subprotocols["entangle_A"].await_signal(
                                 self, Signals.WAITING))
         self.subprotocols["entangle_A"].start_expression = start_expr_ent_A
+        
         self.subprotocols["teleport_A"].start_expression = self.subprotocols["teleport_A"].await_signal(self.subprotocols["purify_A"], Signals.SUCCESS)
         self.subprotocols["teleport_B"].start_expression = self.subprotocols["teleport_B"].await_signal(self.subprotocols["purify_B"], Signals.SUCCESS)
 
@@ -259,11 +261,11 @@ class DistilExample(LocalProtocol):
                 "time": sim_time() - start_time,
                 "pairs": self.subprotocols["entangle_A"].entangled_pairs,
             }
-            self.send_signal(Signals.SUCCESS, [result_tel, result_pur])
+            self.send_signal(Signals.SUCCESS, [result_pur, result_tel])
             #print(f"Simulation {i}: Finish")
 
 
-def network_setup(source_delay=1e5, source_fidelity_sq=1.0, damp_rate=500,
+def network_setup(source_delay=1e5, source_fidelity_sq=1.0, damp_rate=100,
                           node_distance=200):
     network = Network("network")
 
@@ -292,7 +294,7 @@ def network_setup(source_delay=1e5, source_fidelity_sq=1.0, damp_rate=500,
     # "quantum_noise_model": AmplitudeNoiseModel(gamma=damp_rate, time_independent=False)
     # "quantum_noise_model": PhaseNoiseModel(gamma=damp_rate, time_independent=False)
     qchannel = QuantumChannel("QChannel_A->B", length=node_distance,
-                              models={"quantum_noise_model": AmplitudeNoiseModel(gamma=damp_rate, time_independent=False),
+                              models={"quantum_noise_model": PhaseNoiseModel(gamma=damp_rate, time_independent=False),
                                       "delay_model": FibreDelayModel(c=200e3)})
     port_name_a, port_name_b = network.add_connection(
         node_a, node_b, channel_to=qchannel, label="quantum", port_name_node1="qin_charlie", port_name_node2="qin_charlie")
@@ -313,15 +315,15 @@ def sim_setup(node_a, node_b, num_runs):
     def record_run(evexpr):
         # Callback that collects data each run
         protocol = evexpr.triggered_events[-1].source
-        result = protocol.get_signal_result(Signals.SUCCESS)
+        result_pur, result_tel = protocol.get_signal_result(Signals.SUCCESS)
         #print(result)
         # Record fidelity
-        node_a.qmemory.pop(positions=[result[0]["pos_A0"]])
-        node_a.qmemory.pop(positions=[result[0]["pos_A1"]])
-        q_B, = node_b.qmemory.pop(positions=[result[0]["pos_B"]])
+        node_a.qmemory.pop(positions=[result_tel["pos_A0"]])
+        node_a.qmemory.pop(positions=[result_tel["pos_A1"]])
+        q_B, = node_b.qmemory.pop(positions=[result_tel["pos_B"]])
         f2 = qapi.fidelity(q_B, ks.y0, squared=True)
-        prob = 1 / result[1]["runs"]
-        return {"fidelity": f2, "pairs": result[0]["pairs"], "probability": prob, "time": result[0]["time"]}
+        prob = 1 / result_pur["runs"]
+        return {"fidelity": f2, "pairs": result_tel["pairs"], "probability": prob, "time": result_tel["time"]}
 
     dc = DataCollector(record_run, include_time_stamp=False,
                        include_entity_name=False)
@@ -353,7 +355,7 @@ def save_plot(datas, column, title, prefix):
     }
     data = datas.groupby("node_distance")[column].agg(
         **{column:'mean', 'sem':'sem'}).reset_index()
-    save_dir = "./plots_test/deutsch/node_distance/amplitude/500"
+    save_dir = "./plots/deutsch/node_distance/depolar"
     count1 = len([f for f in os.listdir(save_dir)
                  if f.startswith(prefix)])
     filename = f"{save_dir}/{prefix}_{count1 + 1}.png"
@@ -361,14 +363,12 @@ def save_plot(datas, column, title, prefix):
         x='node_distance',
         y=column,
         yerr='sem',
+        xlabel='node_distance [km]',
         **plot_style
     )
     plt.savefig(filename)
     plt.close()
     print(f"Plot saved as {filename}")
-    count2 = len([f for f in os.listdir(save_dir)
-                if f.startswith(column + " summary")])
-    data[['node_distance', column]].to_csv(f"{save_dir}/{column} summary_{count2 + 1}.csv")
 
 def create_plot():
     matplotlib.use('Agg')
@@ -377,22 +377,22 @@ def create_plot():
     save_plot(
         datas,
         column="fidelity",
-        title="Fidelity of the teleported quantum state with deutsch\n(damp_rate=500 Hz)",
+        title="Fidelity of the teleported quantum state with QPA\n(depolar_rate=200 Hz)",
         prefix="Deutsch fidelity"
     )
     save_plot(
         datas,
         column="probability",
-        title="Probability of success with deutsch\n(damp_rate=500 Hz)",
+        title="Probability of success with QPA\n(depolar_rate=200 Hz)",
         prefix="Deutsch probability"
     )
     save_plot(
         datas,
         column="pairs",
-        title="Number of entanglement pairs used with deutsch\n(damp_rate=500 Hz)",
+        title="Number of entanglement pairs used with QPA\n(depolar_rate=200 Hz)",
         prefix="Deutsch pairs"
     )
-    save_dir = "./plots_test/deutsch/node_distance/amplitude/500"
+    save_dir = "./plots/deutsch/node_distance/depolar"
     count = len([f for f in os.listdir(save_dir) if f.startswith("Deutsch result")])
     datas.to_csv(f"{save_dir}/Deutsch result_{count + 1}.csv")
 
@@ -419,7 +419,7 @@ def save_plot_noise(datas, column, title, prefix):
     }
     data = datas.groupby("damp_rate")[column].agg(
         **{column:'mean', 'sem':'sem'}).reset_index()
-    save_dir = "./plots_test/deutsch/noise/phase"
+    save_dir = "./plots/deutsch/noise/phase"
     count1 = len([f for f in os.listdir(save_dir)
                  if f.startswith(prefix)])
     filename = f"{save_dir}/{prefix}_{count1 + 1}.png"
@@ -427,14 +427,12 @@ def save_plot_noise(datas, column, title, prefix):
         x='damp_rate',
         y=column,
         yerr='sem',
+        xlabel='phase_damp_rate [Hz]',
         **plot_style
     )
     plt.savefig(filename)
     plt.close()
     print(f"Plot saved as {filename}")
-    count2 = len([f for f in os.listdir(save_dir)
-                if f.startswith(column + " summary")])
-    data[['damp_rate', column]].to_csv(f"{save_dir}/{column} summary_{count2 + 1}.csv")
 
 def create_plot_noise():
     matplotlib.use('Agg')
@@ -443,22 +441,22 @@ def create_plot_noise():
     save_plot_noise(
         datas,
         column="fidelity",
-        title="Fidelity of the teleported quantum state with deutsch\n(node_distance=200 km)",
+        title="Fidelity of the teleported quantum state with QPA\n(node_distance=200 km)",
         prefix="Deutsch fidelity"
     )
     save_plot_noise(
         datas,
         column="probability",
-        title="Probability of success with deutsch\n(node_distance=200 km)",
+        title="Probability of success with QPA\n(node_distance=200 km)",
         prefix="Deutsch probability"
     )
     save_plot_noise(
         datas,
         column="pairs",
-        title="Number of entanglement pairs used with deutsch\n(node_distance=200 km)",
+        title="Number of entanglement pairs used with QPA\n(node_distance=200 km)",
         prefix="Deutsch pairs"
     )
-    save_dir = "./plots_test/deutsch/noise/phase"
+    save_dir = "./plots/deutsch/noise/phase"
     count = len([f for f in os.listdir(save_dir)
                  if f.startswith("Deutsch result")])
     datas.to_csv(f"{save_dir}/Deutsch result_{count + 1}.csv")
@@ -471,4 +469,4 @@ if __name__ == "__main__":
     #print("Average fidelity of generated entanglement with distil: {}".format(dc.dataframe["fidelity"].mean()))
     #print("Average resource with protection: {}".format(dc.dataframe["pairs"].mean()))
     #print("Average probability of success with protection: {}".format(dc.dataframe["probability"].mean()))
-    create_plot()
+    create_plot_noise()

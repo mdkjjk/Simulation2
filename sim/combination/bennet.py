@@ -333,9 +333,6 @@ def save_plot(datas, column, title, prefix):   # 各指標の結果をグラフ�
     plt.savefig(filename)
     plt.close()
     print(f"Plot saved as {filename}")
-    count2 = len([f for f in os.listdir(save_dir)
-                if f.startswith(column + " summary")])
-    data[['node_distance', column]].to_csv(f"{save_dir}/{column} summary_{count2 + 1}.csv")
 
 def create_plot_node():   # グラフのプロット
     matplotlib.use('Agg')
@@ -401,9 +398,6 @@ def save_plot_noise(datas, column, title, prefix):   # 各指標の結果をグ�
     plt.savefig(filename)
     plt.close()
     print(f"Plot saved as {filename}")
-    count2 = len([f for f in os.listdir(save_dir)
-                if f.startswith(column + " summary")])
-    data[['damp_rate', column]].to_csv(f"{save_dir}/{column} summary_{count2 + 1}.csv")
 
 def create_plot_noise():   # グラフのプロット
     matplotlib.use('Agg')

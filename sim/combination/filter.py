@@ -5,15 +5,13 @@ import pandas
 import matplotlib, os
 from matplotlib import pyplot as plt
 from noise import AmplitudeNoiseModel, PhaseNoiseModel
-from teleportation import InitStateProgram, BellMeasurement, Correction
+from teleportation import BellMeasurement, Correction
 
-import netsquid.components.instructions as instr
 from netsquid.components import ClassicalChannel, QuantumChannel
 from netsquid.components.instructions import INSTR_MEASURE
 from netsquid.components.component import Message, Port
 from netsquid.components.qsource import QSource, SourceStatus
 from netsquid.components.qprocessor import QuantumProcessor
-from netsquid.components.qprogram import QuantumProgram
 from netsquid.components.models.delaymodels import FixedDelayModel, FibreDelayModel
 from netsquid.components.models import DepolarNoiseModel
 from netsquid.util.simtools import sim_time
@@ -194,48 +192,6 @@ class Filter(NodeProtocol):
         return True
 
 class FilteringExample(LocalProtocol):
-    r"""Protocol for a complete filtering experiment.
-
-    Combines the sub-protocols:
-    - :py:class:`~netsquid.examples.entanglenodes.EntangleNodes`
-    - :py:class:`~netsquid.examples.purify.Filter`
-
-    Will run for specified number of times then stop, recording results after each run.
-
-    Parameters
-    ----------
-    node_a : :py:class:`~netsquid.nodes.node.Node`
-        Must be specified before protocol can start.
-    node_b : :py:class:`~netsquid.nodes.node.Node`
-        Must be specified before protocol can start.
-    num_runs : int
-        Number of successful runs to do.
-    epsilon : float
-        Parameter used in filter's measurement operator.
-
-    Attributes
-    ----------
-    results : :py:obj:`dict`
-        Dictionary containing results. Results are :py:class:`numpy.array`\s.
-        Results keys are *fidelity*, *pairs*, and *time*.
-
-    Subprotocols
-    ------------
-    entangle_A : :class:`~netsquid.examples.entanglenodes.EntangleNodes`
-        Entanglement generation protocol running on node A.
-    entangle_B : :class:`~netsquid.examples.entanglenodes.EntangleNodes`
-        Entanglement generation protocol running on node B.
-    purify_A : :class:`~netsquid.examples.purify.Filter`
-        Purification protocol running on node A.
-    purify_B : :class:`~netsquid.examples.purify.Filter`
-        Purification protocol running on node B.
-
-    Notes
-    -----
-        The filter purification does not support the stabilizer formalism.
-
-    """
-
     def __init__(self, node_a, node_b, num_runs, epsilon=0.9):
         super().__init__(nodes={"A": node_a, "B": node_b}, name="Filtering example")
         self._epsilon = epsilon
@@ -259,11 +215,13 @@ class FilteringExample(LocalProtocol):
         self.subprotocols["purify_B1"].start_expression = (
             self.subprotocols["purify_B1"].await_signal(self.subprotocols["entangle_B"],
                                                        Signals.SUCCESS))
+        
         start_expr_ent_A = (self.subprotocols["entangle_A"].await_signal(
                             self.subprotocols["purify_A1"], Signals.FAIL) |
                             self.subprotocols["entangle_A"].await_signal(
                                 self, Signals.WAITING))
         self.subprotocols["entangle_A"].start_expression = start_expr_ent_A
+        
         self.subprotocols["teleport_A"].start_expression = self.subprotocols["teleport_A"].await_signal(self.subprotocols["purify_A1"], Signals.SUCCESS)
         self.subprotocols["teleport_B"].start_expression = self.subprotocols["teleport_B"].await_signal(self.subprotocols["purify_B1"], Signals.SUCCESS)
 
@@ -283,18 +241,18 @@ class FilteringExample(LocalProtocol):
                                                                        self)
             signal_B = self.subprotocols["teleport_B"].get_signal_result(Signals.SUCCESS,
                                                                        self)
-            result = {
+            result_tel = {
                 "pos_A0": signal_A["pos_A0"],
                 "pos_A1": signal_A["pos_A1"],
                 "pos_B": signal_B,
                 "time": sim_time() - start_time,
                 "pairs": self.subprotocols["entangle_A"].entangled_pairs,
             }
-            self.send_signal(Signals.SUCCESS, [result, result_pur])
+            self.send_signal(Signals.SUCCESS, [result_pur, result_tel])
             #print(f"Simulation {i}: Finish")
 
 
-def network_setup(source_delay=1e5, source_fidelity_sq=1.0, damp_rate=500,
+def network_setup(source_delay=1e5, source_fidelity_sq=1.0, damp_rate=200,
                           node_distance=200):
     network = Network("network")
 
@@ -324,7 +282,7 @@ def network_setup(source_delay=1e5, source_fidelity_sq=1.0, damp_rate=500,
     # "quantum_noise_model": AmplitudeNoiseModel(gamma=damp_rate, time_independent=False)
     # "quantum_noise_model": PhaseNoiseModel(gamma=damp_rate, time_independent=False)
     qchannel = QuantumChannel("QChannel_A->B", length=node_distance,
-                              models={"quantum_noise_model": AmplitudeNoiseModel(gamma=damp_rate, time_independent=False),
+                              models={"quantum_noise_model": PhaseNoiseModel(gamma=damp_rate, time_independent=False),
                                       "delay_model": FibreDelayModel(c=200e3)})
     port_name_a, port_name_b = network.add_connection(
         node_a, node_b, channel_to=qchannel, label="quantum", port_name_node1="qin_charlie", port_name_node2="qin_charlie")
@@ -340,30 +298,20 @@ def network_setup(source_delay=1e5, source_fidelity_sq=1.0, damp_rate=500,
 
 
 def sim_setup(node_a, node_b, num_runs, epsilon):
-    """Example simulation setup for purification protocols.
-
-    Returns
-    -------
-    :class:`~netsquid.examples.purify.FilteringExample`
-        Example protocol to run.
-    :class:`pandas.DataFrame`
-        Dataframe of collected data.
-
-    """
     fil_example = FilteringExample(node_a, node_b, num_runs=num_runs, epsilon=epsilon)
 
     def record_run(evexpr):
         # Callback that collects data each run
         protocol = evexpr.triggered_events[-1].source
-        result = protocol.get_signal_result(Signals.SUCCESS)
+        result_pur, result_tel = protocol.get_signal_result(Signals.SUCCESS)
         # Record fidelity
-        node_a.qmemory.pop(positions=[result[0]["pos_A0"]])
-        node_a.qmemory.pop(positions=[result[0]["pos_A1"]])
-        q_B, = node_b.qmemory.pop(positions=[result[0]["pos_B"]])
+        node_a.qmemory.pop(positions=[result_tel["pos_A0"]])
+        node_a.qmemory.pop(positions=[result_tel["pos_A1"]])
+        q_B, = node_b.qmemory.pop(positions=[result_tel["pos_B"]])
         f2 = qapi.fidelity(q_B, ks.y0, squared=True)
-        prob = 1 / result[1]["runs"]
+        prob = 1 / result_pur["runs"]
         #print(f"{result["time"]}: pairs = {result["pairs"]}, fidelity = {fidelity}")
-        return {"fidelity": f2, "pairs": result[0]["pairs"], "probability": prob, "time": result[0]["time"]}
+        return {"fidelity": f2, "pairs": result_tel["pairs"], "probability": prob, "time": result_tel["time"]}
 
     dc = DataCollector(record_run, include_time_stamp=False,
                        include_entity_name=False)
@@ -400,10 +348,10 @@ def save_heatmap(dataframe, value_col, title, colorbar_label, filename_prefix, n
                     ]
     )
     plt.colorbar(im, label=colorbar_label)
-    plt.xlabel('node_distance')
+    plt.xlabel('node_distance [km]')
     plt.ylabel(r'WM strength $\epsilon$')
     plt.title(title)
-    save_dir = "./plots_test/filter/node_distance/amplitude/500"
+    save_dir = "./plots/filter/node_distance/depolar"
     count1 = len([f for f in os.listdir(save_dir) if f.startswith(filename_prefix)])
     filename = f"{save_dir}/{filename_prefix}_{count1 + 1}.png"
     plt.savefig(filename)
@@ -422,9 +370,6 @@ def save_heatmap(dataframe, value_col, title, colorbar_label, filename_prefix, n
         )
 
     print(f"Plot saved as {filename}")
-    count2 = len([f for f in os.listdir(save_dir)
-                if f.startswith(value_col + " summary")])
-    data[['node_distance', 'epsilon', value_col]].to_csv(f"{save_dir}/{value_col} summary_{count2 + 1}.csv")
 
 def create_plot():
     matplotlib.use('Agg')
@@ -435,7 +380,7 @@ def create_plot():
     save_heatmap(
         datas,
         value_col="fidelity",
-        title="Fidelity Heatmap with filtering\n(damp_rate=500 Hz)",
+        title="Fidelity Heatmap with filtering\n(depolar_rate=200 Hz)",
         colorbar_label="Average Fidelity",
         filename_prefix="Filter fidelity",
         node_distances=node_distances,
@@ -445,7 +390,7 @@ def create_plot():
     save_heatmap(
         datas,
         value_col="probability",
-        title="Success Probability Heatmap with filtering\n(damp_rate=500 Hz)",
+        title="Success Probability Heatmap with filtering\n(depolar_rate=200 Hz)",
         colorbar_label="Average Success Probability",
         filename_prefix="Filter probability",
         node_distances=node_distances,
@@ -455,13 +400,13 @@ def create_plot():
     save_heatmap(
         datas,
         value_col="pairs",
-        title="Entanglement Pair Usage Heatmap with filtering\n(damp_rate=500 Hz)",
+        title="Entanglement Pair Usage Heatmap with filtering\n(depolar_rate=200 Hz)",
         colorbar_label="Average Number of Pairs",
         filename_prefix="Filter pairs",
         node_distances=node_distances,
         variable=variable
     )
-    save_dir = "./plots_test/filter/node_distance/amplitude/500"
+    save_dir = "./plots/filter/node_distance/depolar"
     count = len([f for f in os.listdir(save_dir) if f.startswith("Filter result")])
     datas.to_csv(f"{save_dir}/Filter result_{count + 1}.csv")
 
@@ -493,10 +438,10 @@ def save_heatmap_noise(dataframe, value_col, title, colorbar_label, filename_pre
                     ]
     )
     plt.colorbar(im, label=colorbar_label)
-    plt.xlabel('damp_rate')
+    plt.xlabel('phase_damp_rate [Hz]')
     plt.ylabel(r'WM strength $\epsilon$')
     plt.title(title)
-    save_dir = "./plots_test/filter/noise/phase"
+    save_dir = "./plots/filter/noise/phase"
     count1 = len([f for f in os.listdir(save_dir) if f.startswith(filename_prefix)])
     filename = f"{save_dir}/{filename_prefix}_{count1 + 1}.png"
     plt.savefig(filename)
@@ -515,9 +460,6 @@ def save_heatmap_noise(dataframe, value_col, title, colorbar_label, filename_pre
         )
 
     print(f"Plot saved as {filename}")
-    count2 = len([f for f in os.listdir(save_dir)
-                if f.startswith(value_col + " summary")])
-    data[['damp_rate', 'epsilon', value_col]].to_csv(f"{save_dir}/{value_col} summary_{count2 + 1}.csv")
 
 def create_plot_noise():
     matplotlib.use('Agg')
@@ -554,7 +496,7 @@ def create_plot_noise():
         noise_rate=noise_rate,
         variable=variable
     )
-    save_dir = "./plots_test/filter/noise/phase"
+    save_dir = "./plots/filter/noise/phase"
     count = len([f for f in os.listdir(save_dir) if f.startswith("Filter result")])
     datas.to_csv(f"{save_dir}/Filter result_{count + 1}.csv")
 
@@ -566,4 +508,4 @@ if __name__ == "__main__":
     #print("Average fidelity of generated entanglement with filtering: {}".format(dc.dataframe["fidelity"].mean()))
     #print("Average resource with filtering: {}".format(dc.dataframe["pairs"].mean()))
     #print("Average probability of success with filtering: {}".format(dc.dataframe["probability"].mean()))
-    create_plot()
+    create_plot_noise()
