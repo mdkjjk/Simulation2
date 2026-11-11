@@ -5,35 +5,26 @@ import pandas
 import matplotlib, os
 from matplotlib import pyplot as plt
 from noise import AmplitudeNoiseModel, PhaseNoiseModel
-from teleportation import InitStateProgram, BellMeasurement, Correction
+from teleportation import BellMeasurement, Correction
 from filter import Filter
 from wmb import Bennet
 from entanglenodes import EntangleNodes
 
-import netsquid.components.instructions as instr
 from netsquid.components import ClassicalChannel, QuantumChannel
-from netsquid.components.instructions import INSTR_MEASURE
-from netsquid.components.component import Message, Port
 from netsquid.components.qsource import QSource, SourceStatus
 from netsquid.components.qprocessor import QuantumProcessor
-from netsquid.components.qprogram import QuantumProgram
 from netsquid.components.models.delaymodels import FixedDelayModel, FibreDelayModel
 from netsquid.components.models import DepolarNoiseModel
 from netsquid.util.simtools import sim_time
 from netsquid.util.datacollector import DataCollector
-from netsquid.qubits.ketutil import outerprod
-from netsquid.qubits.ketstates import s0, s1
-from netsquid.qubits import operators as ops
 from netsquid.qubits import qubitapi as qapi
 from netsquid.qubits import ketstates as ks
 from netsquid.qubits.state_sampler import StateSampler
 from netsquid.qubits.qformalism import QFormalism
-from netsquid.protocols.nodeprotocols import NodeProtocol, LocalProtocol
+from netsquid.protocols.nodeprotocols import LocalProtocol
 from netsquid.protocols.protocol import Signals
-from netsquid.nodes.node import Node
 from netsquid.nodes.network import Network
 from netsquid.nodes.connections import DirectConnection
-from pydynaa import EventExpression
 
 ns.set_qstate_formalism(QFormalism.DM)
 
@@ -105,7 +96,9 @@ class FilteringBennet(LocalProtocol):
             #print(f"Simulation {i}: Start")
             start_time = sim_time()
             self.subprotocols["entangle_A1"].entangled_pairs = 0
-            self.subprotocols["entangle_A2"].entangled_pairs = 0            
+            self.subprotocols["entangle_A2"].entangled_pairs = 0
+            self.subprotocols["filter_A1"].num_runs = 0
+            self.subprotocols["filter_A2"].num_runs = 0
             self.send_signal(Signals.WAITING)
             yield (self.await_signal(self.subprotocols["teleport_A"], Signals.SUCCESS) &
                    self.await_signal(self.subprotocols["teleport_B"], Signals.SUCCESS))
@@ -139,13 +132,14 @@ def sim_setup(node_a, node_b, num_runs, epsilon):
         # Callback that collects data each run
         protocol = evexpr.triggered_events[-1].source
         result_en, result_tel = protocol.get_signal_result(Signals.SUCCESS)
+        print(result_en)
         # Record fidelity
         node_a.qmemory.discard(positions=[result_tel["pos_A0"]]) # 使用しているメモリを解放
         node_a.qmemory.discard(positions=[result_tel["pos_A1"]])
         q_B, = node_b.qmemory.pop(positions=[result_tel["pos_B"]])
         f2 = qapi.fidelity(q_B, ks.y0, squared=True)
         pairs = result_en["pairs1"] + result_en["pairs2"]
-        #prob = 1 / result["runs"]
+        prob_fil = (result_en["runs_f1"] + result_en["runs_f2"]) / pairs
         #print(f"{result["time"]}: pairs = {result["pairs"]}, fidelity = {fidelity}")
         return {"fidelity": f2, "pairs": pairs, "time": result_tel["time"]}
 
@@ -255,9 +249,9 @@ def create_plot_node(): #グラフ表示のための関数
     data[['node_distance', 'fidelity']].to_csv(f"{save_dir}/Teleportation summary_{existing_files2 + 1}.csv")
 
 if __name__ == "__main__":
-    #network = network_setup()
-    #fb_example, dc = sim_setup(network.get_node("node_A"), network.get_node("node_B"), num_runs=1, epsilon=0.9)
-    #fb_example.start()
-    #ns.sim_run()
-    #print("Average fidelity : {}".format(dc.dataframe["fidelity"].mean()))
-    create_plot_node()
+    network = network_setup()
+    fb_example, dc = sim_setup(network.get_node("node_A"), network.get_node("node_B"), num_runs=2, epsilon=0.9)
+    fb_example.start()
+    ns.sim_run()
+    print("Average fidelity : {}".format(dc.dataframe["fidelity"].mean()))
+    #create_plot_node()

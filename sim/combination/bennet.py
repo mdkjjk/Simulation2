@@ -122,7 +122,6 @@ class Bennet(NodeProtocol):
             self._waiting_on_second_qubit = False
             yield from self._node_do_bennet()   # 精製処理を行う
         else:   # 1つ目のエンタングルメントが到着した場合
-            self.num_runs += 1
             #print(f"{self.name}: Sim {self.num_runs}")
             # Pop previous qubit if present:
             pop_positions = [p for p in self._qmem_positions if p is not None and p != memory_position]
@@ -154,9 +153,9 @@ class Bennet(NodeProtocol):
                 self.local_meas_result is not None and
                 self.remote_meas_result is not None):
             if self.local_meas_result == self.remote_meas_result:
+                self.num_runs += 1
                 self.send_signal(Signals.SUCCESS, [self._qmem_positions[1], self.num_runs])
                 #print(f"{self.name}: SUCCESS / time: {sim_time()}")
-                self.num_runs = 0
             else:
                 self._clear_qmem_positions()
                 self.send_signal(Signals.FAIL, self.local_qcount)
@@ -215,6 +214,7 @@ class BennetExample(LocalProtocol):
             #print(f"Simulation {i}")
             start_time = sim_time()
             self.subprotocols["entangle_A"].entangled_pairs = 0
+            self.subprotocols["bennet_A"].num_runs = 0
             self.send_signal(Signals.WAITING)
             # 各ノードでのテレポーテーション処理が完了するまで待機
             yield (self.await_signal(self.subprotocols["teleport_A"], Signals.SUCCESS) &
@@ -235,7 +235,7 @@ class BennetExample(LocalProtocol):
             }
             self.send_signal(Signals.SUCCESS, [result_en, result_tel])
 
-def network_setup(source_delay=1e5, source_fidelity_sq=1.0, damp_rate=200, node_distance=200):
+def network_setup(source_delay=1e5, source_fidelity_sq=1.0, damp_rate=100, node_distance=200):
     network = Network("bennet_network")
 
     # ノード設定
@@ -287,7 +287,7 @@ def sim_setup(node_a, node_b, num_runs):
         q_B, = node_b.qmemory.pop(positions=[result_tel["pos_B"]])
         #print(qapi.reduced_dm([q_A, q_B]))
         f2 = qapi.fidelity(q_B, ks.y0, squared=True)   # 忠実度を求める
-        prob = 1 / result_en["runs"]   # 成功確率を求める
+        prob = result_en["runs"] / (result_en["pairs"] / 2)   # 成功確率を求める
         return {"fidelity": f2, "pairs": result_en["pairs"], "probability": prob, "time": result_tel["time"]}
 
     dc = DataCollector(record_run, include_time_stamp=False,
@@ -319,7 +319,7 @@ def save_plot(datas, column, title, prefix):   # 各指標の結果をグラフ�
     }
     data = datas.groupby("node_distance")[column].agg(
         **{column:'mean', 'sem':'sem'}).reset_index()
-    save_dir = "./plots/bennet/node_distance/depolar"
+    save_dir = "./plots/bennet/node_distance/phase"
     count1 = len([f for f in os.listdir(save_dir)
                  if f.startswith(prefix)])
     filename = f"{save_dir}/{prefix}_{count1 + 1}.png"
@@ -341,22 +341,22 @@ def create_plot_node():   # グラフのプロット
     save_plot(
         datas,
         column="fidelity",
-        title="Fidelity of the teleported quantum state with bennet\n(depolar_rate=200 Hz)",
+        title="Fidelity of the teleported quantum state with bennet\n(phase_damp_rate=100 Hz)",
         prefix="Bennet fidelity"
     )
     save_plot(
         datas,
         column="probability",
-        title="Probability of success with bennet\n(depolar_rate=200 Hz)",
+        title="Probability of success with bennet\n(phase_damp_rate=100 Hz)",
         prefix="Bennet probability"
     )
     save_plot(
         datas,
         column="pairs",
-        title="Number of entanglement pairs used with bennet\n(depolar_rate=200 Hz)",
+        title="Number of entanglement pairs used with bennet\n(phase_damp_rate=100 Hz)",
         prefix="Bennet pairs"
     )
-    save_dir = "./plots/bennet/node_distance/depolar"
+    save_dir = "./plots/bennet/node_distance/phase"
     count = len([f for f in os.listdir(save_dir)
                  if f.startswith("Bennet result")])
     datas.to_csv(f"{save_dir}/Bennet result_{count + 1}.csv")
@@ -434,4 +434,4 @@ if __name__ == "__main__":
     #print("Average fidelity of generated entanglement with bennet: {}".format(dc.dataframe["fidelity"].mean()))
     #print("Average resource with bennet: {}".format(dc.dataframe["pairs"].mean()))
     #print("Average probability of success with bennet: {}".format(dc.dataframe["probability"].mean()))
-    create_plot_noise()
+    create_plot_node()

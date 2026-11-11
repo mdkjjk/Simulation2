@@ -467,12 +467,12 @@ class Bennet(NodeProtocol):
                 self.remote_meas_result is not None):
             if self.local_meas_result == self.remote_meas_result:
                 self.send_signal(Signals.SUCCESS, [self._qmem_positions[0], self.num_runs])
-                #print(f"{self.name}: SUCCESS / time: {sim_time()}")
+                print(f"{self.name}: SUCCESS / time: {sim_time()}")
                 self.num_runs = 0
             else:
                 self._clear_qmem_positions()
                 self.send_signal(Signals.FAIL, self.local_qcount)
-                #print(f"{self.name}: FAIL")
+                print(f"{self.name}: FAIL")
             self.local_meas_result = None
             self.remote_meas_result = None
             self._qmem_positions = [None, None]

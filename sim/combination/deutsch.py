@@ -34,29 +34,6 @@ from pydynaa import EventExpression
 ns.set_qstate_formalism(QFormalism.DM)
 
 class Distil(NodeProtocol):
-    """Protocol that does local DEJMPS distillation on a node.
-
-    This is done in combination with another node.
-
-    Parameters
-    ----------
-    node : :py:class:`~netsquid.nodes.node.Node`
-        Node with a quantum memory to run protocol on.
-    port : :py:class:`~netsquid.components.component.Port`
-        Port to use for classical IO communication to the other node.
-    role : "A" or "B"
-        Distillation requires that one of the nodes ("B") conjugate its rotation,
-        while the other doesn't ("A").
-    start_expression : :class:`~pydynaa.EventExpression`
-        EventExpression node should wait for before starting distillation.
-        The EventExpression should have a protocol as source, this protocol should signal the quantum memory position
-        of the qubit.
-    msg_header : str, optional
-        Value of header meta field used for classical communication.
-    name : str or None, optional
-        Name of protocol. If None a default name is set.
-
-    """
     # set basis change operators for local DEJMPS step
     _INSTR_Rx = IGate("Rx_gate", ops.create_rotation_op(np.pi / 2, (1, 0, 0)))
     _INSTR_RxC = IGate("RxC_gate", ops.create_rotation_op(np.pi / 2, (1, 0, 0), conjugate=True))
@@ -144,7 +121,6 @@ class Distil(NodeProtocol):
             self._qmem_positions[1] = memory_position
             #print(f"{self.name}: qmem_positions = {self._qmem_positions}")
             self._waiting_on_second_qubit = False
-            self.num_runs += 1
             #print(f"{self.name}: Sim {self.num_runs}")
             yield from self._node_do_DEJMPS()
         else:
@@ -184,9 +160,9 @@ class Distil(NodeProtocol):
                 self.remote_meas_result is not None):
             if self.local_meas_result == self.remote_meas_result:
                 # SUCCESS
+                self.num_runs += 1
                 self.send_signal(Signals.SUCCESS, [self._qmem_positions[0], self.num_runs])
                 #print(f"{self.name}: SUCCESS / time: {sim_time()}")
-                self.num_runs = 0
             else:
                 # FAILURE
                 self._clear_qmem_positions()
@@ -217,26 +193,26 @@ class DistilExample(LocalProtocol):
         self.add_subprotocol(
             EntangleNodes(node=node_b, role="receiver", input_mem_pos=0, num_pairs=2,
                           name="entangle_B"))
-        self.add_subprotocol(Distil(node_a, node_a.ports["cout_bob"], role="A", name="purify_A"))
-        self.add_subprotocol(Distil(node_b, node_b.ports["cin_alice"], role="B", name="purify_B"))
+        self.add_subprotocol(Distil(node_a, node_a.ports["cout_bob"], role="A", name="qpa_A"))
+        self.add_subprotocol(Distil(node_b, node_b.ports["cin_alice"], role="B", name="qpa_B"))
         self.add_subprotocol(BellMeasurement(node=node_a, port=node_a.ports["cout_bob"], name="teleport_A"))
         self.add_subprotocol(Correction(node=node_b, name="teleport_B"))
         
-        self.subprotocols["purify_A"].start_expression = (
-            self.subprotocols["purify_A"].await_signal(self.subprotocols["entangle_A"],
+        self.subprotocols["qpa_A"].start_expression = (
+            self.subprotocols["qpa_A"].await_signal(self.subprotocols["entangle_A"],
                                                        Signals.SUCCESS))
-        self.subprotocols["purify_B"].start_expression = (
-            self.subprotocols["purify_B"].await_signal(self.subprotocols["entangle_B"],
+        self.subprotocols["qpa_B"].start_expression = (
+            self.subprotocols["qpa_B"].await_signal(self.subprotocols["entangle_B"],
                                                        Signals.SUCCESS))
         
         start_expr_ent_A = (self.subprotocols["entangle_A"].await_signal(
-                            self.subprotocols["purify_A"], Signals.FAIL) |
+                            self.subprotocols["qpa_A"], Signals.FAIL) |
                             self.subprotocols["entangle_A"].await_signal(
                                 self, Signals.WAITING))
         self.subprotocols["entangle_A"].start_expression = start_expr_ent_A
         
-        self.subprotocols["teleport_A"].start_expression = self.subprotocols["teleport_A"].await_signal(self.subprotocols["purify_A"], Signals.SUCCESS)
-        self.subprotocols["teleport_B"].start_expression = self.subprotocols["teleport_B"].await_signal(self.subprotocols["purify_B"], Signals.SUCCESS)
+        self.subprotocols["teleport_A"].start_expression = self.subprotocols["teleport_A"].await_signal(self.subprotocols["qpa_A"], Signals.SUCCESS)
+        self.subprotocols["teleport_B"].start_expression = self.subprotocols["teleport_B"].await_signal(self.subprotocols["qpa_B"], Signals.SUCCESS)
 
     def run(self):
         self.start_subprotocols()
@@ -244,12 +220,15 @@ class DistilExample(LocalProtocol):
             #print(f"Simulation {i}: Start")
             start_time = sim_time()
             self.subprotocols["entangle_A"].entangled_pairs = 0
+            self.subprotocols["qpa_A"].num_runs = 0
             self.send_signal(Signals.WAITING)
             yield (self.await_signal(self.subprotocols["teleport_A"], Signals.SUCCESS) &
                    self.await_signal(self.subprotocols["teleport_B"], Signals.SUCCESS))
-            signal_A_pur = self.subprotocols["purify_A"].get_signal_result(Signals.SUCCESS,
+            signal_A_pur = self.subprotocols["qpa_A"].get_signal_result(Signals.SUCCESS,
                                                                        self)
-            result_pur = {"runs": signal_A_pur[1]}
+            result_pur = {"runs": signal_A_pur[1],
+                          "pairs": self.subprotocols["entangle_A"].entangled_pairs,
+                          }
             signal_A_tel = self.subprotocols["teleport_A"].get_signal_result(Signals.SUCCESS,
                                                                        self)
             signal_B_tel = self.subprotocols["teleport_B"].get_signal_result(Signals.SUCCESS,
@@ -259,7 +238,6 @@ class DistilExample(LocalProtocol):
                 "pos_A1": signal_A_tel["pos_A1"],
                 "pos_B": signal_B_tel,
                 "time": sim_time() - start_time,
-                "pairs": self.subprotocols["entangle_A"].entangled_pairs,
             }
             self.send_signal(Signals.SUCCESS, [result_pur, result_tel])
             #print(f"Simulation {i}: Finish")
@@ -322,8 +300,8 @@ def sim_setup(node_a, node_b, num_runs):
         node_a.qmemory.pop(positions=[result_tel["pos_A1"]])
         q_B, = node_b.qmemory.pop(positions=[result_tel["pos_B"]])
         f2 = qapi.fidelity(q_B, ks.y0, squared=True)
-        prob = 1 / result_pur["runs"]
-        return {"fidelity": f2, "pairs": result_tel["pairs"], "probability": prob, "time": result_tel["time"]}
+        prob = result_pur["runs"] / (result_pur["pairs"] / 2)
+        return {"fidelity": f2, "pairs": result_pur["pairs"], "probability": prob, "time": result_tel["time"]}
 
     dc = DataCollector(record_run, include_time_stamp=False,
                        include_entity_name=False)
@@ -355,7 +333,7 @@ def save_plot(datas, column, title, prefix):
     }
     data = datas.groupby("node_distance")[column].agg(
         **{column:'mean', 'sem':'sem'}).reset_index()
-    save_dir = "./plots/deutsch/node_distance/depolar"
+    save_dir = "./plots/deutsch/node_distance/phase"
     count1 = len([f for f in os.listdir(save_dir)
                  if f.startswith(prefix)])
     filename = f"{save_dir}/{prefix}_{count1 + 1}.png"
@@ -377,22 +355,22 @@ def create_plot():
     save_plot(
         datas,
         column="fidelity",
-        title="Fidelity of the teleported quantum state with QPA\n(depolar_rate=200 Hz)",
+        title="Fidelity of the teleported quantum state with QPA\n(phase_damp_rate=100 Hz)",
         prefix="Deutsch fidelity"
     )
     save_plot(
         datas,
         column="probability",
-        title="Probability of success with QPA\n(depolar_rate=200 Hz)",
+        title="Probability of success with QPA\n(phase_damp_rate=100 Hz)",
         prefix="Deutsch probability"
     )
     save_plot(
         datas,
         column="pairs",
-        title="Number of entanglement pairs used with QPA\n(depolar_rate=200 Hz)",
+        title="Number of entanglement pairs used with QPA\n(phase_damp_rate=100 Hz)",
         prefix="Deutsch pairs"
     )
-    save_dir = "./plots/deutsch/node_distance/depolar"
+    save_dir = "./plots/deutsch/node_distance/phase"
     count = len([f for f in os.listdir(save_dir) if f.startswith("Deutsch result")])
     datas.to_csv(f"{save_dir}/Deutsch result_{count + 1}.csv")
 
@@ -400,14 +378,14 @@ def run_experiment_noise(noise_rate):
     fidelity_data = pandas.DataFrame()
     for noise in noise_rate:
         ns.sim_reset()
-        network = network_setup(damp_rate=noise)
+        network = network_setup(depolar_rate=noise)
         node_a = network.get_node("node_A")
         node_b = network.get_node("node_B")
         be_example, dc = sim_setup(node_a, node_b, 1000)
         be_example.start()
         ns.sim_run()
         df = dc.dataframe
-        df['damp_rate'] = noise
+        df['depolar_rate'] = noise
         fidelity_data = pandas.concat([fidelity_data, df])
     return fidelity_data
 
@@ -417,17 +395,17 @@ def save_plot_noise(datas, column, title, prefix):
         'grid': True,
         'title': title
     }
-    data = datas.groupby("damp_rate")[column].agg(
+    data = datas.groupby("depolar_rate")[column].agg(
         **{column:'mean', 'sem':'sem'}).reset_index()
-    save_dir = "./plots/deutsch/noise/phase"
+    save_dir = "./plots/deutsch/noise/depolar"
     count1 = len([f for f in os.listdir(save_dir)
                  if f.startswith(prefix)])
     filename = f"{save_dir}/{prefix}_{count1 + 1}.png"
     data.plot(
-        x='damp_rate',
+        x='depolar_rate',
         y=column,
         yerr='sem',
-        xlabel='phase_damp_rate [Hz]',
+        xlabel='depolar_rate [Hz]',
         **plot_style
     )
     plt.savefig(filename)
@@ -456,7 +434,7 @@ def create_plot_noise():
         title="Number of entanglement pairs used with QPA\n(node_distance=200 km)",
         prefix="Deutsch pairs"
     )
-    save_dir = "./plots/deutsch/noise/phase"
+    save_dir = "./plots/deutsch/noise/depolar"
     count = len([f for f in os.listdir(save_dir)
                  if f.startswith("Deutsch result")])
     datas.to_csv(f"{save_dir}/Deutsch result_{count + 1}.csv")
@@ -469,4 +447,4 @@ if __name__ == "__main__":
     #print("Average fidelity of generated entanglement with distil: {}".format(dc.dataframe["fidelity"].mean()))
     #print("Average resource with protection: {}".format(dc.dataframe["pairs"].mean()))
     #print("Average probability of success with protection: {}".format(dc.dataframe["probability"].mean()))
-    create_plot_noise()
+    create_plot()
