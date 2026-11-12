@@ -10,30 +10,21 @@ from filter import Filter
 from wmd import Distil
 from entanglenodes import EntangleNodes
 
-import netsquid.components.instructions as instr
 from netsquid.components import ClassicalChannel, QuantumChannel
-from netsquid.components.instructions import INSTR_MEASURE
-from netsquid.components.component import Message, Port
 from netsquid.components.qsource import QSource, SourceStatus
 from netsquid.components.qprocessor import QuantumProcessor
-from netsquid.components.qprogram import QuantumProgram
 from netsquid.components.models.delaymodels import FixedDelayModel, FibreDelayModel
 from netsquid.components.models import DepolarNoiseModel
 from netsquid.util.simtools import sim_time
 from netsquid.util.datacollector import DataCollector
-from netsquid.qubits.ketutil import outerprod
-from netsquid.qubits.ketstates import s0, s1
-from netsquid.qubits import operators as ops
 from netsquid.qubits import qubitapi as qapi
 from netsquid.qubits import ketstates as ks
 from netsquid.qubits.state_sampler import StateSampler
 from netsquid.qubits.qformalism import QFormalism
-from netsquid.protocols.nodeprotocols import NodeProtocol, LocalProtocol
+from netsquid.protocols.nodeprotocols import LocalProtocol
 from netsquid.protocols.protocol import Signals
-from netsquid.nodes.node import Node
 from netsquid.nodes.network import Network
 from netsquid.nodes.connections import DirectConnection
-from pydynaa import EventExpression
 
 ns.set_qstate_formalism(QFormalism.DM)
 
@@ -105,21 +96,23 @@ class FilteringDeutsch(LocalProtocol):
             #print(f"Simulation {i}: Start")
             start_time = sim_time()
             self.subprotocols["entangle_A1"].entangled_pairs = 0
-            self.subprotocols["entangle_A2"].entangled_pairs = 0            
+            self.subprotocols["entangle_A2"].entangled_pairs = 0  
+            self.subprotocols["filter_A1"].num_runs = 0
+            self.subprotocols["filter_A2"].num_runs = 0          
             self.send_signal(Signals.WAITING)
             yield (self.await_signal(self.subprotocols["teleport_A"], Signals.SUCCESS) &
                    self.await_signal(self.subprotocols["teleport_B"], Signals.SUCCESS))
             filter1 = self.subprotocols["filter_A1"].get_signal_result(Signals.SUCCESS,self)
             filter2 = self.subprotocols["filter_A2"].get_signal_result(Signals.SUCCESS,self)
-            bennet = self.subprotocols["deutsch_A'"].get_signal_result(Signals.SUCCESS,self)
+            qpa = self.subprotocols["deutsch_A'"].get_signal_result(Signals.SUCCESS,self)
             result_en = {
                 "runs_f1": filter1[1],
                 "runs_f2": filter2[1],
-                "runs_b": bennet[1],
+                "runs_d": qpa[1],
                 "pairs1": self.subprotocols["entangle_A1"].entangled_pairs,
                 "pairs2": self.subprotocols["entangle_A2"].entangled_pairs,
             }
-            print(result_en)
+            #print(result_en)
             result_A = self.subprotocols["teleport_A"].get_signal_result(Signals.SUCCESS, self)
             result_B = self.subprotocols["teleport_B"].get_signal_result(Signals.SUCCESS, self)
             result_tel = {
@@ -128,7 +121,7 @@ class FilteringDeutsch(LocalProtocol):
                 "pos_B": result_B,
                 "time": sim_time() - start_time
             }
-            print(result_tel)
+            #print(result_tel)
             self.send_signal(Signals.SUCCESS, [result_en, result_tel])
             #print(f"Simulation {i}: Finish")
 
@@ -145,9 +138,12 @@ def sim_setup(node_a, node_b, num_runs, epsilon):
         q_B, = node_b.qmemory.pop(positions=[result_tel["pos_B"]])
         f2 = qapi.fidelity(q_B, ks.y0, squared=True)
         pairs = result_en["pairs1"] + result_en["pairs2"]
-        #prob = 1 / result["runs"]
+        prob_fil = (result_en["runs_f1"] + result_en["runs_f2"]) / pairs
+        prob_qpa = 1.0 / result_en["runs_d"]
+        prob = prob_fil * prob_qpa        
         #print(f"{result["time"]}: pairs = {result["pairs"]}, fidelity = {fidelity}")
-        return {"fidelity": f2, "pairs": pairs, "time": result_tel["time"]}
+        return {"fidelity": f2, "pairs": pairs, "probability": prob,
+                "probability_filter":prob_fil, "probability_qpa": prob_qpa, "time": result_tel["time"]}
 
     dc = DataCollector(record_run, include_time_stamp=False,
                        include_entity_name=False)
@@ -155,7 +151,7 @@ def sim_setup(node_a, node_b, num_runs, epsilon):
                                      event_type=Signals.SUCCESS.value))
     return fb_example, dc
 
-def network_setup(source_delay=1e5, source_fidelity_sq=1.0, damp_rate=500,
+def network_setup(source_delay=1e5, source_fidelity_sq=1.0, damp_rate=200,
                           node_distance=200):
     network = Network("network")
 
@@ -220,9 +216,190 @@ def network_setup(source_delay=1e5, source_fidelity_sq=1.0, damp_rate=500,
     node_b.ports[port_name_b2].forward_input(node_b.qmemory.ports["qin1"])
     return network
 
+def run_experiment(node_distances, variable):
+    fidelity_data = pandas.DataFrame()
+    for node_distance in node_distances:
+        for epsilon in variable:
+            ns.sim_reset()
+            network = network_setup(node_distance=node_distance)
+            node_a = network.get_node("node_A")
+            node_b = network.get_node("node_B")
+            pro_example, dc = sim_setup(node_a, node_b, 1000, epsilon)
+            pro_example.start()
+            ns.sim_run()
+            df = dc.dataframe
+            df['node_distance'] = node_distance
+            df['epsilon'] = epsilon
+            fidelity_data = pandas.concat([fidelity_data, df])
+    return fidelity_data
+
+def save_heatmap(dataframe, value_col, title, colorbar_label, filename_prefix, node_distances, variable):
+    data = dataframe.groupby(["node_distance", "epsilon"])[value_col].mean().reset_index()
+    heatmap_data = data.pivot(index='epsilon', columns='node_distance', values=value_col)
+    plt.figure(figsize=(8, 6))
+    im = plt.imshow(heatmap_data, origin='lower', aspect='auto',
+                    extent=[
+                        min(node_distances), max(node_distances),
+                        min(variable), max(variable)
+                    ]
+    )
+    plt.colorbar(im, label=colorbar_label)
+    plt.xlabel('node_distance [km]')
+    plt.ylabel(r'WM strength $\epsilon$')
+    plt.title(title)
+    save_dir = "./plots/filter-deutsch/node_distance/amplitude"
+    count1 = len([f for f in os.listdir(save_dir) if f.startswith(filename_prefix)])
+    filename = f"{save_dir}/{filename_prefix}_{count1 + 1}.png"
+    plt.savefig(filename)
+    plt.close()
+    if value_col == "fidelity":
+        best_rows = data.loc[data.groupby("node_distance")["fidelity"].idxmax()]
+        best_rows = best_rows.sort_values("node_distance")
+
+        print("Optimal value for each node distance:")
+        print(best_rows)
+        count = len([f for f in os.listdir(save_dir)
+                if f.startswith("optimal summary")])
+        best_rows.to_csv(
+            f"{save_dir}/optimal summary_{count + 1}.csv",
+            index=False
+        )
+
+    print(f"Plot saved as {filename}")
+
+def create_plot():
+    matplotlib.use('Agg')
+    node_distances = [i for i in range(10, 1000, 50)]
+    variable = [i for i in np.arange(0.1, 1.0, 0.1)]
+    datas = run_experiment(node_distances, variable)
+    # 忠実度
+    save_heatmap(
+        datas,
+        value_col="fidelity",
+        title="Fidelity Heatmap with filtering & deutsch\n(amplitude_damp_rate=200 Hz)",
+        colorbar_label="Average Fidelity",
+        filename_prefix="Filter-Deutsch fidelity",
+        node_distances=node_distances,
+        variable=variable
+    )
+    # 成功確率
+    save_heatmap(
+        datas,
+        value_col="probability",
+        title="Success Probability Heatmap with filtering & deutsch\n(amplitude_damp_rate=200 Hz)",
+        colorbar_label="Average Success Probability",
+        filename_prefix="Filter-Deutsch probability",
+        node_distances=node_distances,
+        variable=variable
+    )
+    # エンタングルメントペア消費数
+    save_heatmap(
+        datas,
+        value_col="pairs",
+        title="Entanglement Pair Usage Heatmap with filtering & deutsch\n(amplitude_damp_rate=200 Hz)",
+        colorbar_label="Average Number of Pairs",
+        filename_prefix="Filter-Deutsch pairs",
+        node_distances=node_distances,
+        variable=variable
+    )
+    save_dir = "./plots/filter-deutsch/node_distance/amplitude"
+    count = len([f for f in os.listdir(save_dir) if f.startswith("Filter-Deutsch result")])
+    datas.to_csv(f"{save_dir}/Filter-Deutsch result_{count + 1}.csv")
+
+def run_experiment_noise(noise_rate, variable):
+    fidelity_data = pandas.DataFrame()
+    for noise in noise_rate:
+        for epsilon in variable:
+            ns.sim_reset()
+            network = network_setup(damp_rate=noise)
+            node_a = network.get_node("node_A")
+            node_b = network.get_node("node_B")
+            pro_example, dc = sim_setup(node_a, node_b, 1000, epsilon)
+            pro_example.start()
+            ns.sim_run()
+            df = dc.dataframe
+            df['damp_rate'] = noise
+            df['epsilon'] = epsilon
+            fidelity_data = pandas.concat([fidelity_data, df])
+    return fidelity_data
+
+def save_heatmap_noise(dataframe, value_col, title, colorbar_label, filename_prefix, noise_rate, variable):
+    data = dataframe.groupby(["damp_rate", "epsilon"])[value_col].mean().reset_index()
+    heatmap_data = data.pivot(index='epsilon', columns='damp_rate', values=value_col)
+    plt.figure(figsize=(8, 6))
+    im = plt.imshow(heatmap_data, origin='lower', aspect='auto',
+                    extent=[
+                        min(noise_rate), max(noise_rate),
+                        min(variable), max(variable)
+                    ]
+    )
+    plt.colorbar(im, label=colorbar_label)
+    plt.xlabel('amplitude_damp_rate [Hz]')
+    plt.ylabel(r'WM strength $\epsilon$')
+    plt.title(title)
+    save_dir = "./plots/filter-deutsch/noise/amplitude"
+    count1 = len([f for f in os.listdir(save_dir) if f.startswith(filename_prefix)])
+    filename = f"{save_dir}/{filename_prefix}_{count1 + 1}.png"
+    plt.savefig(filename)
+    plt.close()
+    if value_col == "fidelity":
+        best_rows = data.loc[data.groupby("damp_rate")["fidelity"].idxmax()]
+        best_rows = best_rows.sort_values("damp_rate")
+
+        print("Optimal value for each node distance:")
+        print(best_rows)
+        count = len([f for f in os.listdir(save_dir)
+                if f.startswith("optimal summary")])
+        best_rows.to_csv(
+            f"{save_dir}/optimal summary_{count + 1}.csv",
+            index=False
+        )
+
+    print(f"Plot saved as {filename}")
+
+def create_plot_noise():
+    matplotlib.use('Agg')
+    noise_rate = [i for i in range(0, 1500, 100)]
+    variable = [i for i in np.arange(0.1, 1.0, 0.1)]
+    datas = run_experiment_noise(noise_rate, variable)
+    # 忠実度
+    save_heatmap_noise(
+        datas,
+        value_col="fidelity",
+        title="Fidelity Heatmap with filtering & deutsch\n(node_distance=200 km)",
+        colorbar_label="Average Fidelity",
+        filename_prefix="Filter-Deutsch fidelity",
+        noise_rate=noise_rate,
+        variable=variable
+    )
+    # 成功確率
+    save_heatmap_noise(
+        datas,
+        value_col="probability",
+        title="Success Probability Heatmap with filtering & deutsch\n(node_distance=200 km)",
+        colorbar_label="Average Success Probability",
+        filename_prefix="Filter-Deutsch probability",
+        noise_rate=noise_rate,
+        variable=variable
+    )
+    # エンタングルメントペア消費数
+    save_heatmap_noise(
+        datas,
+        value_col="pairs",
+        title="Entanglement Pair Usage Heatmap with filtering & deutsch\n(node_distance=200 km)",
+        colorbar_label="Average Number of Pairs",
+        filename_prefix="Filter-Deutsch pairs",
+        noise_rate=noise_rate,
+        variable=variable
+    )
+    save_dir = "./plots/filter-deutsch/noise/amplitude"
+    count = len([f for f in os.listdir(save_dir) if f.startswith("Filter-Deutsch result")])
+    datas.to_csv(f"{save_dir}/Filter-Deutsch result_{count + 1}.csv")
+
 if __name__ == "__main__":
-    network = network_setup()
-    fb_example, dc = sim_setup(network.get_node("node_A"), network.get_node("node_B"), num_runs=1, epsilon=0.9)
-    fb_example.start()
-    ns.sim_run()
-    print("Average fidelity : {}".format(dc.dataframe["fidelity"].mean()))
+    #network = network_setup()
+    #fb_example, dc = sim_setup(network.get_node("node_A"), network.get_node("node_B"), num_runs=2, epsilon=0.9)
+    #fb_example.start()
+    #ns.sim_run()
+    #print("Average fidelity : {}".format(dc.dataframe["fidelity"].mean()))
+    create_plot()

@@ -132,7 +132,7 @@ def sim_setup(node_a, node_b, num_runs, epsilon):
         # Callback that collects data each run
         protocol = evexpr.triggered_events[-1].source
         result_en, result_tel = protocol.get_signal_result(Signals.SUCCESS)
-        print(result_en)
+        #print(result_en)
         # Record fidelity
         node_a.qmemory.discard(positions=[result_tel["pos_A0"]]) # 使用しているメモリを解放
         node_a.qmemory.discard(positions=[result_tel["pos_A1"]])
@@ -141,9 +141,10 @@ def sim_setup(node_a, node_b, num_runs, epsilon):
         pairs = result_en["pairs1"] + result_en["pairs2"]
         prob_fil = (result_en["runs_f1"] + result_en["runs_f2"]) / pairs
         prob_be = 1.0 / result_en["runs_b"]
-        #print(f"{result["time"]}: pairs = {result["pairs"]}, fidelity = {fidelity}")
-        return {"fidelity": f2, "pairs": pairs, "probability_filter":prob_fil,
-                "probability_bennet": prob_be, "time": result_tel["time"]}
+        prob = prob_fil * prob_be
+        #print(f"prob_fil= {prob_fil}, prob_be= {prob_be}, prob= {prob}")
+        return {"fidelity": f2, "pairs": pairs, "probability": prob,
+                "probability_filter":prob_fil, "probability_bennet": prob_be, "time": result_tel["time"]}
 
     dc = DataCollector(record_run, include_time_stamp=False,
                        include_entity_name=False)
@@ -151,7 +152,7 @@ def sim_setup(node_a, node_b, num_runs, epsilon):
                                      event_type=Signals.SUCCESS.value))
     return fb_example, dc
 
-def network_setup(source_delay=1e5, source_fidelity_sq=1.0, depolar_rate=200,
+def network_setup(source_delay=1e5, source_fidelity_sq=1.0, damp_rate=100,
                           node_distance=200):
     network = Network("network")
 
@@ -190,12 +191,12 @@ def network_setup(source_delay=1e5, source_fidelity_sq=1.0, depolar_rate=200,
     # "quantum_noise_model": AmplitudeNoiseModel(gamma=damp_rate, time_independent=False)
     # "quantum_noise_model": PhaseNoiseModel(gamma=damp_rate, time_independent=False)
     qchannel1 = QuantumChannel("QChannel_A->B", length=node_distance,
-                              models={"quantum_noise_model": DepolarNoiseModel(depolar_rate=depolar_rate, time_independent=False),
+                              models={"quantum_noise_model": PhaseNoiseModel(gamma=damp_rate, time_independent=False),
                                       "delay_model": FibreDelayModel(c=200e3)})
     port_name_a1, port_name_b1 = network.add_connection(node_a, node_b, channel_to=qchannel1, label="quantum1",
                                                       port_name_node1="qout_bob1", port_name_node2="qin_alice1")
     qchannel2 = QuantumChannel("QChannel_A->B", length=node_distance,
-                              models={"quantum_noise_model": DepolarNoiseModel(depolar_rate=depolar_rate, time_independent=False),
+                              models={"quantum_noise_model": PhaseNoiseModel(gamma=damp_rate, time_independent=False),
                                       "delay_model": FibreDelayModel(c=200e3)})
     port_name_a2, port_name_b2 = network.add_connection(node_a, node_b, channel_to=qchannel2, label="quantum2",
                                                       port_name_node1="qout_bob2", port_name_node2="qin_alice2")
@@ -245,7 +246,7 @@ def save_heatmap(dataframe, value_col, title, colorbar_label, filename_prefix, n
     plt.xlabel('node_distance [km]')
     plt.ylabel(r'WM strength $\epsilon$')
     plt.title(title)
-    save_dir = "./plots/filter-bennet/node_distance/depolar"
+    save_dir = "./plots/filter-bennet/node_distance/phase"
     count1 = len([f for f in os.listdir(save_dir) if f.startswith(filename_prefix)])
     filename = f"{save_dir}/{filename_prefix}_{count1 + 1}.png"
     plt.savefig(filename)
@@ -274,7 +275,7 @@ def create_plot():
     save_heatmap(
         datas,
         value_col="fidelity",
-        title="Fidelity Heatmap with filtering & bennet\n(depolar_rate=200 Hz)",
+        title="Fidelity Heatmap with filtering & bennet\n(phase_damp_rate=100 Hz)",
         colorbar_label="Average Fidelity",
         filename_prefix="Filter-Bennet fidelity",
         node_distances=node_distances,
@@ -284,7 +285,7 @@ def create_plot():
     save_heatmap(
         datas,
         value_col="probability",
-        title="Success Probability Heatmap with filtering & bennet\n(depolar_rate=200 Hz)",
+        title="Success Probability Heatmap with filtering & bennet\n(phase_damp_rate=100 Hz)",
         colorbar_label="Average Success Probability",
         filename_prefix="Filter-Bennet probability",
         node_distances=node_distances,
@@ -294,36 +295,36 @@ def create_plot():
     save_heatmap(
         datas,
         value_col="pairs",
-        title="Entanglement Pair Usage Heatmap with filtering & bennet\n(depolar_rate=200 Hz)",
+        title="Entanglement Pair Usage Heatmap with filtering & bennet\n(phase_damp_rate=100 Hz)",
         colorbar_label="Average Number of Pairs",
         filename_prefix="Filter-Bennet pairs",
         node_distances=node_distances,
         variable=variable
     )
-    save_dir = "./plots/filter/node_distance/depolar"
-    count = len([f for f in os.listdir(save_dir) if f.startswith("Filter result")])
-    datas.to_csv(f"{save_dir}/Filter result_{count + 1}.csv")
+    save_dir = "./plots/filter-bennet/node_distance/phase"
+    count = len([f for f in os.listdir(save_dir) if f.startswith("Filter-Bennet result")])
+    datas.to_csv(f"{save_dir}/Filter-Bennet result_{count + 1}.csv")
 
 def run_experiment_noise(noise_rate, variable):
     fidelity_data = pandas.DataFrame()
     for noise in noise_rate:
         for epsilon in variable:
             ns.sim_reset()
-            network = network_setup(depolar_rate=noise)
+            network = network_setup(damp_rate=noise)
             node_a = network.get_node("node_A")
             node_b = network.get_node("node_B")
             pro_example, dc = sim_setup(node_a, node_b, 1000, epsilon)
             pro_example.start()
             ns.sim_run()
             df = dc.dataframe
-            df['depolar_rate'] = noise
+            df['damp_rate'] = noise
             df['epsilon'] = epsilon
             fidelity_data = pandas.concat([fidelity_data, df])
     return fidelity_data
 
 def save_heatmap_noise(dataframe, value_col, title, colorbar_label, filename_prefix, noise_rate, variable):
-    data = dataframe.groupby(["depolar_rate", "epsilon"])[value_col].mean().reset_index()
-    heatmap_data = data.pivot(index='epsilon', columns='depolar_rate', values=value_col)
+    data = dataframe.groupby(["damp_rate", "epsilon"])[value_col].mean().reset_index()
+    heatmap_data = data.pivot(index='epsilon', columns='damp_rate', values=value_col)
     plt.figure(figsize=(8, 6))
     im = plt.imshow(heatmap_data, origin='lower', aspect='auto',
                     extent=[
@@ -332,17 +333,17 @@ def save_heatmap_noise(dataframe, value_col, title, colorbar_label, filename_pre
                     ]
     )
     plt.colorbar(im, label=colorbar_label)
-    plt.xlabel('depolar_rate [Hz]')
+    plt.xlabel('phase_damp_rate [Hz]')
     plt.ylabel(r'WM strength $\epsilon$')
     plt.title(title)
-    save_dir = "./plots/filter/noise/depolar"
+    save_dir = "./plots/filter-bennet/noise/phase"
     count1 = len([f for f in os.listdir(save_dir) if f.startswith(filename_prefix)])
     filename = f"{save_dir}/{filename_prefix}_{count1 + 1}.png"
     plt.savefig(filename)
     plt.close()
     if value_col == "fidelity":
-        best_rows = data.loc[data.groupby("depolar_rate")["fidelity"].idxmax()]
-        best_rows = best_rows.sort_values("depolar_rate")
+        best_rows = data.loc[data.groupby("damp_rate")["fidelity"].idxmax()]
+        best_rows = best_rows.sort_values("damp_rate")
 
         print("Optimal value for each node distance:")
         print(best_rows)
@@ -364,9 +365,9 @@ def create_plot_noise():
     save_heatmap_noise(
         datas,
         value_col="fidelity",
-        title="Fidelity Heatmap with filtering\n(node_distance=200 km)",
+        title="Fidelity Heatmap with filtering & bennet\n(node_distance=200 km)",
         colorbar_label="Average Fidelity",
-        filename_prefix="Filter fidelity",
+        filename_prefix="Filter-Bennet fidelity",
         noise_rate=noise_rate,
         variable=variable
     )
@@ -374,9 +375,9 @@ def create_plot_noise():
     save_heatmap_noise(
         datas,
         value_col="probability",
-        title="Success Probability Heatmap with filtering\n(node_distance=200 km)",
+        title="Success Probability Heatmap with filtering & bennet\n(node_distance=200 km)",
         colorbar_label="Average Success Probability",
-        filename_prefix="Filter probability",
+        filename_prefix="Filter-Bennet probability",
         noise_rate=noise_rate,
         variable=variable
     )
@@ -384,20 +385,20 @@ def create_plot_noise():
     save_heatmap_noise(
         datas,
         value_col="pairs",
-        title="Entanglement Pair Usage Heatmap with filtering\n(node_distance=200 km)",
+        title="Entanglement Pair Usage Heatmap with filtering & bennet\n(node_distance=200 km)",
         colorbar_label="Average Number of Pairs",
-        filename_prefix="Filter pairs",
+        filename_prefix="Filter-Bennet pairs",
         noise_rate=noise_rate,
         variable=variable
     )
-    save_dir = "./plots/filter/noise/depolar"
-    count = len([f for f in os.listdir(save_dir) if f.startswith("Filter result")])
-    datas.to_csv(f"{save_dir}/Filter result_{count + 1}.csv")
+    save_dir = "./plots/filter-bennet/noise/phase"
+    count = len([f for f in os.listdir(save_dir) if f.startswith("Filter-Bennet result")])
+    datas.to_csv(f"{save_dir}/Filter-Bennet result_{count + 1}.csv")
 
 if __name__ == "__main__":
-    network = network_setup()
-    fb_example, dc = sim_setup(network.get_node("node_A"), network.get_node("node_B"), num_runs=2, epsilon=0.9)
-    fb_example.start()
-    ns.sim_run()
-    print("Average fidelity : {}".format(dc.dataframe["fidelity"].mean()))
-    #create_plot_node()
+    #network = network_setup()
+    #fb_example, dc = sim_setup(network.get_node("node_A"), network.get_node("node_B"), num_runs=2, epsilon=0.9)
+    #fb_example.start()
+    #ns.sim_run()
+    #print("Average fidelity : {}".format(dc.dataframe["fidelity"].mean()))
+    create_plot_noise()
