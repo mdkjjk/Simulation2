@@ -151,7 +151,7 @@ def sim_setup(node_a, node_b, num_runs, epsilon):
                                      event_type=Signals.SUCCESS.value))
     return fb_example, dc
 
-def network_setup(source_delay=1e5, source_fidelity_sq=1.0, damp_rate=200,
+def network_setup(source_delay=1e5, source_fidelity_sq=1.0, depolar_rate=200,
                           node_distance=200):
     network = Network("network")
 
@@ -192,12 +192,12 @@ def network_setup(source_delay=1e5, source_fidelity_sq=1.0, damp_rate=200,
     # "quantum_noise_model": AmplitudeNoiseModel(gamma=damp_rate, time_independent=False)
     # "quantum_noise_model": PhaseNoiseModel(gamma=damp_rate, time_independent=False)
     qchannel1 = QuantumChannel("QChannel_A->B", length=node_distance,
-                              models={"quantum_noise_model": AmplitudeNoiseModel(gamma=damp_rate, time_independent=False),
+                              models={"quantum_noise_model": DepolarNoiseModel(depolar_rate=depolar_rate, time_independent=False),
                                       "delay_model": FibreDelayModel(c=200e3)})
     port_name_a1, port_name_b1 = network.add_connection(node_a, node_b, channel_to=qchannel1, label="quantum1",
                                                       port_name_node1="qout_bob1", port_name_node2="qin_alice1")
     qchannel2 = QuantumChannel("QChannel_A->B", length=node_distance,
-                              models={"quantum_noise_model": AmplitudeNoiseModel(gamma=damp_rate, time_independent=False),
+                              models={"quantum_noise_model": DepolarNoiseModel(depolar_rate=depolar_rate, time_independent=False),
                                       "delay_model": FibreDelayModel(c=200e3)})
     port_name_a2, port_name_b2 = network.add_connection(node_a, node_b, channel_to=qchannel2, label="quantum2",
                                                       port_name_node1="qout_bob2", port_name_node2="qin_alice2")
@@ -247,7 +247,7 @@ def save_heatmap(dataframe, value_col, title, colorbar_label, filename_prefix, n
     plt.xlabel('node_distance [km]')
     plt.ylabel(r'WM strength $\epsilon$')
     plt.title(title)
-    save_dir = "./plots/filter-deutsch/node_distance/amplitude"
+    save_dir = "./plots/filter-deutsch/node_distance/depolar"
     count1 = len([f for f in os.listdir(save_dir) if f.startswith(filename_prefix)])
     filename = f"{save_dir}/{filename_prefix}_{count1 + 1}.png"
     plt.savefig(filename)
@@ -276,7 +276,7 @@ def create_plot():
     save_heatmap(
         datas,
         value_col="fidelity",
-        title="Fidelity Heatmap with filtering & deutsch\n(amplitude_damp_rate=200 Hz)",
+        title="Fidelity Heatmap with filtering & deutsch\n(depolar_rate=200 Hz)",
         colorbar_label="Average Fidelity",
         filename_prefix="Filter-Deutsch fidelity",
         node_distances=node_distances,
@@ -286,7 +286,7 @@ def create_plot():
     save_heatmap(
         datas,
         value_col="probability",
-        title="Success Probability Heatmap with filtering & deutsch\n(amplitude_damp_rate=200 Hz)",
+        title="Success Probability Heatmap with filtering & deutsch\n(depolar_rate=200 Hz)",
         colorbar_label="Average Success Probability",
         filename_prefix="Filter-Deutsch probability",
         node_distances=node_distances,
@@ -296,13 +296,13 @@ def create_plot():
     save_heatmap(
         datas,
         value_col="pairs",
-        title="Entanglement Pair Usage Heatmap with filtering & deutsch\n(amplitude_damp_rate=200 Hz)",
+        title="Entanglement Pair Usage Heatmap with filtering & deutsch\n(depolar_rate=200 Hz)",
         colorbar_label="Average Number of Pairs",
         filename_prefix="Filter-Deutsch pairs",
         node_distances=node_distances,
         variable=variable
     )
-    save_dir = "./plots/filter-deutsch/node_distance/amplitude"
+    save_dir = "./plots/filter-deutsch/node_distance/depolar"
     count = len([f for f in os.listdir(save_dir) if f.startswith("Filter-Deutsch result")])
     datas.to_csv(f"{save_dir}/Filter-Deutsch result_{count + 1}.csv")
 
@@ -311,21 +311,21 @@ def run_experiment_noise(noise_rate, variable):
     for noise in noise_rate:
         for epsilon in variable:
             ns.sim_reset()
-            network = network_setup(damp_rate=noise)
+            network = network_setup(depolar_rate=noise)
             node_a = network.get_node("node_A")
             node_b = network.get_node("node_B")
             pro_example, dc = sim_setup(node_a, node_b, 1000, epsilon)
             pro_example.start()
             ns.sim_run()
             df = dc.dataframe
-            df['damp_rate'] = noise
+            df['depolar_rate'] = noise
             df['epsilon'] = epsilon
             fidelity_data = pandas.concat([fidelity_data, df])
     return fidelity_data
 
 def save_heatmap_noise(dataframe, value_col, title, colorbar_label, filename_prefix, noise_rate, variable):
-    data = dataframe.groupby(["damp_rate", "epsilon"])[value_col].mean().reset_index()
-    heatmap_data = data.pivot(index='epsilon', columns='damp_rate', values=value_col)
+    data = dataframe.groupby(["depolar_rate", "epsilon"])[value_col].mean().reset_index()
+    heatmap_data = data.pivot(index='epsilon', columns='depolar_rate', values=value_col)
     plt.figure(figsize=(8, 6))
     im = plt.imshow(heatmap_data, origin='lower', aspect='auto',
                     extent=[
@@ -334,17 +334,17 @@ def save_heatmap_noise(dataframe, value_col, title, colorbar_label, filename_pre
                     ]
     )
     plt.colorbar(im, label=colorbar_label)
-    plt.xlabel('amplitude_damp_rate [Hz]')
+    plt.xlabel('depolar_rate [Hz]')
     plt.ylabel(r'WM strength $\epsilon$')
     plt.title(title)
-    save_dir = "./plots/filter-deutsch/noise/amplitude"
+    save_dir = "./plots/filter-deutsch/noise/depolar"
     count1 = len([f for f in os.listdir(save_dir) if f.startswith(filename_prefix)])
     filename = f"{save_dir}/{filename_prefix}_{count1 + 1}.png"
     plt.savefig(filename)
     plt.close()
     if value_col == "fidelity":
-        best_rows = data.loc[data.groupby("damp_rate")["fidelity"].idxmax()]
-        best_rows = best_rows.sort_values("damp_rate")
+        best_rows = data.loc[data.groupby("depolar_rate")["fidelity"].idxmax()]
+        best_rows = best_rows.sort_values("depolar_rate")
 
         print("Optimal value for each node distance:")
         print(best_rows)
@@ -392,7 +392,7 @@ def create_plot_noise():
         noise_rate=noise_rate,
         variable=variable
     )
-    save_dir = "./plots/filter-deutsch/noise/amplitude"
+    save_dir = "./plots/filter-deutsch/noise/depolar"
     count = len([f for f in os.listdir(save_dir) if f.startswith("Filter-Deutsch result")])
     datas.to_csv(f"{save_dir}/Filter-Deutsch result_{count + 1}.csv")
 
@@ -402,4 +402,4 @@ if __name__ == "__main__":
     #fb_example.start()
     #ns.sim_run()
     #print("Average fidelity : {}".format(dc.dataframe["fidelity"].mean()))
-    create_plot()
+    create_plot_noise()

@@ -12,11 +12,8 @@ from bennet import Bennet
 from netsquid.qubits import operators as ops
 from netsquid.qubits import qubitapi as qapi
 from netsquid.qubits import ketstates as ks
-from netsquid.qubits.qubitapi import fidelity, discard, combine_qubits
-from netsquid.qubits.ketstates import s00, b00, y0
 from netsquid.qubits.state_sampler import StateSampler
 from netsquid.qubits.qformalism import QFormalism
-from netsquid.qubits.dmtools import DenseDMRepr
 from netsquid.nodes.node import Node
 from netsquid.nodes.network import Network
 from netsquid.nodes.connections import DirectConnection
@@ -28,12 +25,10 @@ from netsquid.components.qprocessor import QuantumProcessor
 from netsquid.components.qprogram import QuantumProgram
 from netsquid.components.models import DepolarNoiseModel
 from netsquid.components.models.delaymodels import FixedDelayModel, FibreDelayModel
-from netsquid.components.models.qerrormodels import QuantumErrorModel
 from netsquid.protocols.protocol import Signals
 from netsquid.protocols.nodeprotocols import NodeProtocol, LocalProtocol
 from netsquid.util.simtools import sim_time
 from netsquid.util.datacollector import DataCollector
-from netsquid.util.constrainedmap import ValueConstraint
 from pydynaa import EventExpression
 
 ns.set_qstate_formalism(QFormalism.DM)
@@ -48,6 +43,7 @@ class Protect(NodeProtocol):   # Alice側のプロトコル
         # TODO rename this expression to 'qubit input'
         self.start_expression = start_expression
         self.pair_id = pair_id
+        self.num_runs = 0
         self.local_qcount = 0
         self.local_meas_result = None
         self.remote_qcount = 0
@@ -131,7 +127,8 @@ class Protect(NodeProtocol):   # Alice側のプロトコル
             self.local_meas_result = None
             self.remote_meas_result = None
         else:
-            self.send_signal(Signals.SUCCESS, [self._qmem_positions[0], self.local_qcount])
+            self.num_runs += 1
+            self.send_signal(Signals.SUCCESS, [self._qmem_positions[0], self.num_runs])
             #print(f"{self.name}: SUCCESS")
             self.local_qcount = 0
 
@@ -555,14 +552,20 @@ class ProtectBennet(LocalProtocol):
                 start_time = sim_time()
                 self.subprotocols["entangle_A1"].entangled_pairs = 0
                 self.subprotocols["entangle_A2"].entangled_pairs = 0
+                self.subprotocols["protect_A1"].num_runs = 0
+                self.subprotocols["protect_A2"].num_runs = 0
                 self.send_signal(Signals.WAITING)
                 yield (self.await_signal(self.subprotocols["teleport_A"], Signals.SUCCESS)
                        & self.await_signal(self.subprotocols["teleport_B"], Signals.SUCCESS))
+                protect1 = self.subprotocols["protect_A1"].get_signal_result(Signals.SUCCESS, self)
+                protect2 = self.subprotocols["protect_A2"].get_signal_result(Signals.SUCCESS, self)
                 signal_A = self.subprotocols["bennet_A"].get_signal_result(Signals.SUCCESS, self)
                 result_en = {
                     "pairs1": self.subprotocols["entangle_A1"].entangled_pairs,
                     "pairs2": self.subprotocols["entangle_A2"].entangled_pairs,
-                    "runs": signal_A[1]
+                    "runs_p1": protect1[1],
+                    "runs_p2": protect2[1],
+                    "runs_b": signal_A[1]
                 }
                 result_A = self.subprotocols["teleport_A"].get_signal_result(Signals.SUCCESS, self)
                 result_B = self.subprotocols["teleport_B"].get_signal_result(Signals.SUCCESS, self)
@@ -587,9 +590,12 @@ def sim_setup(node_a, node_b, num_runs, omega, theta):
         q_B, = node_b.qmemory.pop(positions=[result_tel["pos_B"]])
         #print(qapi.reduced_dm([q_A, q_B]))
         pairs = result_en["pairs1"] + result_en["pairs2"]
-        prob = 1 / result_en["runs"]
+        prob_pro = (result_en["runs_p1"] + result_en["runs_p2"]) / pairs
+        prob_be = 1.0 / result_en["runs_b"]
+        prob = prob_pro * prob_be
         f2 = qapi.fidelity(q_B, ks.y0, squared=True)
-        return {"fidelity": f2, "pairs": pairs, "probability": prob, "time": result_tel["time"]}
+        return {"fidelity": f2, "pairs": pairs, "probability": prob,
+                "probability_protect": prob_pro, "probability_bennet": prob_be, "time": result_tel["time"]}
 
     dc = DataCollector(record_run, include_time_stamp=False,
                         include_entity_name=False)

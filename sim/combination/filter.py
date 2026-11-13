@@ -235,7 +235,7 @@ class FilteringExample(LocalProtocol):
                    self.await_signal(self.subprotocols["teleport_B"], Signals.SUCCESS))
             signal_A_pur = self.subprotocols["filter_A"].get_signal_result(Signals.SUCCESS,
                                                                        self)
-            result_pur = {"runs": signal_A_pur[1],
+            result_en = {"runs": signal_A_pur[1],
                           "pairs": self.subprotocols["entangle_A"].entangled_pairs,
                           }
             signal_A = self.subprotocols["teleport_A"].get_signal_result(Signals.SUCCESS,
@@ -248,7 +248,7 @@ class FilteringExample(LocalProtocol):
                 "pos_B": signal_B,
                 "time": sim_time() - start_time,
             }
-            self.send_signal(Signals.SUCCESS, [result_pur, result_tel])
+            self.send_signal(Signals.SUCCESS, [result_en, result_tel])
             #print(f"Simulation {i}: Finish")
 
 
@@ -303,16 +303,16 @@ def sim_setup(node_a, node_b, num_runs, epsilon):
     def record_run(evexpr):
         # Callback that collects data each run
         protocol = evexpr.triggered_events[-1].source
-        result_pur, result_tel = protocol.get_signal_result(Signals.SUCCESS)
-        #print(result_pur)
+        result_en, result_tel = protocol.get_signal_result(Signals.SUCCESS)
+        #print(result_en)
         # Record fidelity
         node_a.qmemory.pop(positions=[result_tel["pos_A0"]])
         node_a.qmemory.pop(positions=[result_tel["pos_A1"]])
         q_B, = node_b.qmemory.pop(positions=[result_tel["pos_B"]])
         f2 = qapi.fidelity(q_B, ks.y0, squared=True)
-        prob = result_pur["runs"] / result_pur["pairs"]
+        prob = result_en["runs"] / result_en["pairs"]
         #print(f"{result["time"]}: pairs = {result["pairs"]}, fidelity = {fidelity}")
-        return {"fidelity": f2, "pairs": result_pur["pairs"], "probability": prob, "time": result_tel["time"]}
+        return {"fidelity": f2, "pairs": result_en["pairs"], "probability": prob, "time": result_tel["time"]}
 
     dc = DataCollector(record_run, include_time_stamp=False,
                        include_entity_name=False)

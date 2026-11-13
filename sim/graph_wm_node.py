@@ -9,7 +9,12 @@ matplotlib.use("Agg")
 # 設定
 # ==================================================
 
-BASE_DIR = Path("./plots_test/protect/node_distance")
+BASE_DIR = Path("./plots/filter/node_distance")
+
+PROTOCOLS = {
+    "filter": "Filter result_1.csv",
+    "protect": "Protect_summary.csv"
+}
 
 NOISES = [
     "amplitude",
@@ -20,12 +25,12 @@ NOISES = [
 # 10, 60, 110, ..., 960
 NODE_DISTANCES = range(10, 961, 50)
 
-CSV_NAME = "Protect result_1.csv"
+CSV_NAME = "Filter result_1.csv"
 
 # ノイズごとのサブフォルダ
 SUB_DIR = {
-    "amplitude": "500",
-    "depolar": "100",
+    "amplitude": None,
+    "depolar": None,
     "phase": None
 }
 
@@ -44,7 +49,6 @@ def load_result_csv(node_distance, noise):
     if sub_dir is None:
         csv_path = (
             BASE_DIR
-            / str(node_distance)
             / noise
             / CSV_NAME
         )
@@ -66,7 +70,7 @@ def summarize_result(df):
     """
 
     summary = (
-        df.groupby(["omega", "theta"])
+        df.groupby(["epsilon"])
         .agg(
             fidelity=("fidelity", "mean"),
             pairs=("pairs", "mean"),
@@ -123,7 +127,7 @@ def save_summary(df, noise):
     最大値一覧をCSV保存
     """
     if SUB_DIR[noise] is None:
-        save_path = BASE_DIR / f"{noise}/Protect_summary.csv"
+        save_path = BASE_DIR / f"{noise}/Filter_summary.csv"
     else:
         save_path = BASE_DIR / noise / SUB_DIR[noise] / "Protect_summary.csv"
 
@@ -146,14 +150,19 @@ def save_graph(df, noise, y_column, ylabel):
         linewidth=2
     )
 
-    plt.xlabel("Node distance")
+    plt.xlabel("Node distance [km]")
     plt.ylabel(ylabel)
-    plt.title(f"{noise} : {ylabel}")
+    if noise == "depolar":
+        plt.title(f"Fidelity of the teleported quantum state with filtering\n{noise}_rate=200 Hz")
+    elif noise == "amplitude":
+        plt.title(f"Fidelity of the teleported quantum state with filtering\n{noise}_damp_rate=200 Hz")
+    else:
+        plt.title(f"Fidelity of the teleported quantum state with filtering\n{noise}_damp_rate=100 Hz")
 
     plt.grid(True)
 
     if SUB_DIR[noise] is None:
-        save_path = BASE_DIR / f"{noise}/{noise}_{y_column}.png"
+        save_path = BASE_DIR / f"{noise}/Optimal {y_column} result.png"
     else:
         save_path = BASE_DIR / noise / SUB_DIR[noise] / f"{noise}_{y_column}.png"
 
@@ -188,25 +197,25 @@ for noise in NOISES:
         "Maximum Fidelity"
     )
 
-    save_graph(
-        summary_df,
-        noise,
-        "pairs",
-        "Pairs"
-    )
+    # save_graph(
+    #     summary_df,
+    #     noise,
+    #     "pairs",
+    #     "Pairs"
+    # )
 
-    save_graph(
-        summary_df,
-        noise,
-        "probability",
-        "Probability"
-    )
+    # save_graph(
+    #     summary_df,
+    #     noise,
+    #     "probability",
+    #     "Probability"
+    # )
 
-    save_graph(
-        summary_df,
-        noise,
-        "time",
-        "Time [ns]"
-    )
+    # save_graph(
+    #     summary_df,
+    #     noise,
+    #     "time",
+    #     "Time [ns]"
+    # )
 
 print("\nFinished.")
