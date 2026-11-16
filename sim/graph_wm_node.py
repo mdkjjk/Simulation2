@@ -9,11 +9,12 @@ matplotlib.use("Agg")
 # 設定
 # ==================================================
 
-BASE_DIR = Path("./plots/filter/node_distance")
+BASE_DIR = Path("./combination/plots")
 
 PROTOCOLS = {
     "filter": "Filter result_1.csv",
-    "protect": "Protect_summary.csv"
+    "filter-bennet": "Filter-Bennet result_1.csv",
+    "filter-deutsch": "Filter-Deutsch result_1.csv"
 }
 
 NOISES = [
@@ -22,51 +23,46 @@ NOISES = [
     "phase"
 ]
 
+CSV_NAMES = {
+    "filter": "Filter summary.csv",
+    "filter-bennet": "Filter-Bennet summary.csv",
+    "filter-deutsch": "Filter-Deutsch summary.csv"    
+}
+
 # 10, 60, 110, ..., 960
 NODE_DISTANCES = range(10, 961, 50)
 
-CSV_NAME = "Filter result_1.csv"
-
-# ノイズごとのサブフォルダ
-SUB_DIR = {
-    "amplitude": None,
-    "depolar": None,
-    "phase": None
-}
+# サブフォルダ
+# SUB_DIR = {
+#     "amplitude": None,
+#     "depolar": None,
+#     "phase": None
+# }
 
 
 # ==================================================
 # 関数
 # ==================================================
 
-def load_result_csv(node_distance, noise):
+def load_result_csv(protocol, filename, noise):
     """
-    Protect result_1.csv を読み込む
+    csvファイルを読み込む
     """
 
-    sub_dir = SUB_DIR[noise]
-
-    if sub_dir is None:
-        csv_path = (
-            BASE_DIR
-            / noise
-            / CSV_NAME
-        )
-    else:
-        csv_path = (
-            BASE_DIR
-            / str(node_distance)
-            / noise
-            / sub_dir
-            / CSV_NAME
-        )
+    csv_path = (
+        BASE_DIR
+        / protocol
+        / "node_distance"
+        / noise
+        / filename
+    )
 
     return pd.read_csv(csv_path), csv_path.parent
 
 
 def summarize_result(df):
     """
-    omega・thetaごとに平均を計算
+    パラメータごとに平均を計算
     """
 
     summary = (
@@ -94,7 +90,7 @@ def get_best_results(noise):
     for distance in NODE_DISTANCES:
 
         try:
-            df, save_dir = load_result_csv(distance, noise)
+            df, save_dir = load_result_csv(protocol, filename, noise)
         except FileNotFoundError:
             print(f"Skip : {distance} ({noise})")
             continue
@@ -119,24 +115,21 @@ def get_best_results(noise):
         if c != "node_distance"
     ]
 
-    return result_df[columns]
+    return result_df[columns], save_dir
 
 
-def save_summary(df, noise):
+def save_summary(save_dir, df, filename):
     """
     最大値一覧をCSV保存
     """
-    if SUB_DIR[noise] is None:
-        save_path = BASE_DIR / f"{noise}/Filter_summary.csv"
-    else:
-        save_path = BASE_DIR / noise / SUB_DIR[noise] / "Protect_summary.csv"
+    save_path = save_dir / filename
 
     df.to_csv(save_path, index=False)
 
     print(f"Saved : {save_path}")
 
 
-def save_graph(df, noise, y_column, ylabel):
+def save_graph(df, noise, y_column, ylabel, save_dir):
     """
     グラフ保存
     """
@@ -161,10 +154,7 @@ def save_graph(df, noise, y_column, ylabel):
 
     plt.grid(True)
 
-    if SUB_DIR[noise] is None:
-        save_path = BASE_DIR / f"{noise}/Optimal {y_column} result.png"
-    else:
-        save_path = BASE_DIR / noise / SUB_DIR[noise] / f"{noise}_{y_column}.png"
+    save_path = save_dir / f"Optimal {y_column} result.png"
 
     plt.savefig(save_path, dpi=300)
     plt.close()
@@ -180,14 +170,15 @@ for noise in NOISES:
 
     print(f"\n===== {noise.upper()} =====")
 
-    summary_df = get_best_results(noise)
+    for protocol, filename in PROTOCOLS.items():
+        summary_df, save_dir = get_best_results(noise)
 
     if summary_df.empty:
         print("No data.")
         continue
 
     # CSV保存
-    save_summary(summary_df, noise)
+    save_summary(save_dir,summary_df)
 
     # グラフ保存
     save_graph(
