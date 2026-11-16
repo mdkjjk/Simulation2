@@ -9,7 +9,13 @@ matplotlib.use("Agg")
 # 設定
 # ==================================================
 
-BASE_DIR = Path("./plots_test/protect/noise")
+BASE_DIR = Path("./combination/plots")
+
+PROTOCOLS = {
+    "filter": "Filter result_1.csv",
+    "filter-bennet": "Filter-Bennet result_1.csv",
+    "filter-deutsch": "Filter-Deutsch result_1.csv"
+}
 
 NOISES = [
     "amplitude",
@@ -17,121 +23,158 @@ NOISES = [
     "phase"
 ]
 
-NOISE_RATES = range(100, 1500, 100)
-
-CSV_NAME = "Protect result_1.csv"
+CSV_NAMES = {
+    "filter": "Filter summary.csv",
+    "filter-bennet": "Filter-Bennet summary.csv",
+    "filter-deutsch": "Filter-Deutsch summary.csv"
+}
 
 
 # ==================================================
-# 関数
+# CSV読み込み
 # ==================================================
 
-def summarize_result(df):
+def load_result_csv(protocol, filename, noise):
     """
-    omega, thetaごとに平均を計算
+    CSVファイルを読み込む
+    """
+
+    csv_path = (
+        BASE_DIR
+        / protocol
+        / "noise"
+        / noise
+        / filename
+    )
+
+    # 先頭列の行番号をインデックスとして読み込む
+    df = pd.read_csv(csv_path, index_col=0)
+
+    return df, csv_path.parent
+
+
+# ==================================================
+# 減衰率の列名を取得
+# ==================================================
+
+def get_rate_column(noise):
+    """
+    ノイズの種類に応じて減衰率の列名を取得する
+    """
+
+    if noise == "depolar":
+        return "depolar_rate"
+    else:
+        return "damp_rate"
+
+
+# ==================================================
+# epsilon・減衰率ごとの平均値を計算
+# ==================================================
+
+def summarize_result(df, rate_column):
+    """
+    epsilonと減衰率の組み合わせごとに
+    その他の数値列の平均値を計算する
     """
 
     summary = (
-        df.groupby(["omega", "theta"])
-        .agg(
-            fidelity=("fidelity", "mean"),
-            pairs=("pairs", "mean"),
-            probability=("probability", "mean"),
-            time=("time", "mean"),
-        )
+        df.groupby([rate_column, "epsilon"])
+        .mean(numeric_only=True)
         .reset_index()
     )
 
     return summary
 
 
-def get_best_result(noise):
+# ==================================================
+# 各減衰率でfidelityが最大のデータを取得
+# ==================================================
+
+def get_best_results(df, rate_column):
     """
-    各ノイズレートについて
-    fidelity最大となるデータを取得
+    各減衰率について
+    fidelityが最大となる行を取得する
     """
 
-    results = []
+    # epsilon・減衰率ごとの平均値
+    summary = summarize_result(df, rate_column)
 
-    for rate in NOISE_RATES:
+    # 各減衰率でfidelityが最大となる行のindex
+    best_indices = (
+        summary.groupby(rate_column)["fidelity"].idxmax()
+    )
 
-        csv_path = (
-            BASE_DIR
-            / str(rate)
-            / noise
-            / CSV_NAME
-        )
+    # 該当する行を取得
+    result_df = (
+        summary.loc[best_indices]
+        .sort_values(rate_column)
+        .reset_index(drop=True)
+    )
 
-        df = pd.read_csv(csv_path)
-
-        # omega, thetaごとに平均
-        summary = summarize_result(df)
-
-        # fidelity最大
-        best = summary.loc[summary["fidelity"].idxmax()].copy()
-
-        if noise == "depolar":
-            best["depolar_rate"] = rate
-        else:
-            best["damp_rate"] = rate
-
-        results.append(best)
-
-    result_df = pd.DataFrame(results)
-
-    if noise == "depolar":
-        columns = ["depolar_rate"] + [
-            c for c in result_df.columns
-            if c != "depolar_rate"
-        ]
-    else:
-        columns = ["damp_rate"] + [
-            c for c in result_df.columns
-            if c != "damp_rate"
-        ]
-
-    return result_df[columns]
+    return result_df
 
 
-def save_summary(df, noise):
+# ==================================================
+# CSV保存
+# ==================================================
 
-    save_path = BASE_DIR / f"{noise}/Protect_summary.csv"
+def save_summary(save_dir, df, filename):
+    """
+    最適なパラメータの一覧をCSV保存
+    """
+
+    save_path = save_dir / filename
 
     df.to_csv(save_path, index=False)
 
-    print(f"Saved : {save_path}")
+    print(f"Saved CSV : {save_path}")
 
 
-def save_graph(df, y, ylabel, noise):
+# ==================================================
+# グラフ保存
+# ==================================================
 
-    plt.figure(figsize=(8,6))
+def save_graph(df, rate_column, y_column, protocol, noise, save_dir):
+    """
+    減衰率を横軸、指定した列を縦軸としてグラフを保存
+    """
+
+    plt.figure(figsize=(8, 6))
+
+    plt.plot(
+        df[rate_column],
+        df[y_column],
+        marker="o",
+        linewidth=2
+    )
 
     if noise == "depolar":
-        plt.plot(
-            df["depolar_rate"],
-            df[y],
-            marker="o",
-            linewidth=2
-        )
+        xlabel = "Depolarization rate [Hz]"
+    elif noise == "amplitude":
+        xlabel = "Amplitude damping rate [Hz]"
     else:
-        plt.plot(
-            df["damp_rate"],
-            df[y],
-            marker="o",
-            linewidth=2
-        )
+        xlabel = "Phase damping rate [Hz]"
 
-    plt.xlabel("Noise rate")
-    plt.ylabel(ylabel)
-    plt.title(f"{ylabel} ({df.name})")
+    plt.xlabel(xlabel)
+    plt.ylabel(y_column)
+
+    plt.title(
+        f"{y_column} of {protocol}\nNoise: {noise}"
+    )
+
     plt.grid(True)
+    plt.tight_layout()
 
-    save_path = BASE_DIR / f"{noise}/{df.name}_{y}.png"
+    save_path = (
+        save_dir
+        / f"{protocol} {y_column} summary.png"
+    )
 
     plt.savefig(save_path, dpi=300)
     plt.close()
 
-    print(f"Saved : {save_path}")
+    print(f"Saved Graph : {save_path}")
 
 
 # ==================================================
@@ -142,42 +185,59 @@ for noise in NOISES:
 
     print(f"\n===== {noise.upper()} =====")
 
-    # 最大fidelityを取得
-    result = get_best_result(noise)
+    # ノイズの種類に応じた減衰率の列名
+    rate_column = get_rate_column(noise)
 
-    # 名前を保存（グラフ保存用）
-    result.name = noise
+    for protocol, filename in PROTOCOLS.items():
 
-    # CSV保存
-    save_summary(result, noise)
+        print(f"\n--- {protocol} ---")
 
-    # グラフ保存
-    save_graph(
-        result,
-        "fidelity",
-        "Maximum Fidelity",
-        noise
-    )
+        try:
+            df, save_dir = load_result_csv(
+                protocol,
+                filename,
+                noise
+            )
 
-    save_graph(
-        result,
-        "pairs",
-        "Pairs",
-        noise
-    )
+        except FileNotFoundError:
+            print(f"CSV not found : {protocol} ({noise})")
+            continue
 
-    save_graph(
-        result,
-        "probability",
-        "Probability",
-        noise
-    )
+        # 各減衰率でfidelityが最大の行を取得
+        summary_df = get_best_results(
+            df,
+            rate_column
+        )
 
-    save_graph(
-        result,
-        "time",
-        "Time [ns]",
-        noise
-    )
+        if summary_df.empty:
+            print("No data.")
+            continue
+
+        # CSV保存
+        save_summary(
+            save_dir,
+            summary_df,
+            CSV_NAMES[protocol]
+        )
+
+        # 減衰率とepsilon以外の列をグラフ化
+        y_columns = [
+            "fidelity"
+            # column
+            # for column in summary_df.columns
+            # if column not in [rate_column, "epsilon"]
+        ]
+
+        for y_column in y_columns:
+
+            save_graph(
+                summary_df,
+                rate_column,
+                y_column,
+                protocol,
+                noise,
+                save_dir
+            )
+
 
 print("\nFinished.")

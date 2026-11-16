@@ -613,4 +613,4 @@ if __name__ == "__main__":
     # print("Average fidelity of generated entanglement with protection: {}".format(dc.dataframe["fidelity"].mean()))
     #print("Average resource with protection: {}".format(dc.dataframe["pairs"].mean()))
     #print("Average probability of success with protection: {}".format(dc.dataframe["probability"].mean()))
-    create_plot()
+    create_plot_noise()
