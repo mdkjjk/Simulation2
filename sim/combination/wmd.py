@@ -12,28 +12,23 @@ from wmb import Protect, RWMeasure, QuantumDispatcher
 from netsquid.qubits import operators as ops
 from netsquid.qubits import qubitapi as qapi
 from netsquid.qubits import ketstates as ks
-from netsquid.qubits.qubitapi import fidelity, discard
-from netsquid.qubits.ketstates import s00, b00, y0
 from netsquid.qubits.state_sampler import StateSampler
 from netsquid.qubits.qformalism import QFormalism
-from netsquid.qubits.dmtools import DenseDMRepr
 from netsquid.nodes.node import Node
 from netsquid.nodes.network import Network
 from netsquid.nodes.connections import DirectConnection
 from netsquid.components import ClassicalChannel, QuantumChannel
-from netsquid.components.instructions import INSTR_MEASURE, INSTR_CNOT, INSTR_X, IGate
+from netsquid.components.instructions import INSTR_MEASURE, INSTR_CNOT, IGate
 from netsquid.components.component import Message, Port
 from netsquid.components.qsource import QSource, SourceStatus
 from netsquid.components.qprocessor import QuantumProcessor
 from netsquid.components.qprogram import QuantumProgram
 from netsquid.components.models import DepolarNoiseModel
 from netsquid.components.models.delaymodels import FixedDelayModel, FibreDelayModel
-from netsquid.components.models.qerrormodels import QuantumErrorModel
 from netsquid.protocols.protocol import Signals
 from netsquid.protocols.nodeprotocols import NodeProtocol, LocalProtocol
 from netsquid.util.simtools import sim_time
 from netsquid.util.datacollector import DataCollector
-from netsquid.util.constrainedmap import ValueConstraint
 from pydynaa import EventExpression
 
 ns.set_qstate_formalism(QFormalism.DM)
@@ -186,9 +181,9 @@ class ProtectDeutsch(LocalProtocol):
             self.add_subprotocol(Protect(node_a, node_a.ports["cout_bob2"], omega=omega,pair_id=2, name="protect_A2"))
             self.add_subprotocol(QuantumDispatcher(node_b, node_b.ports["qdispatch_in"], name="quantum_dispatcher"))
             self.add_subprotocol(RWMeasure(node_b, node_b.ports["cin_alice1"], self.subprotocols["quantum_dispatcher"],
-                                         pair_id=1, theta=theta, name="rwmeasure_B1"))
+                                         pair_id=1, theta=theta, name="protect_B1"))
             self.add_subprotocol(RWMeasure(node_b, node_b.ports["cin_alice2"], self.subprotocols["quantum_dispatcher"],
-                                         pair_id=2, theta=theta, name="rwmeasure_B2"))
+                                         pair_id=2, theta=theta, name="protect_B2"))
             # 精製処理プロトコル
             self.add_subprotocol(Distil(node_a, node_a.ports["cout_bob"], role="A", name="deutsch_A"))
             self.add_subprotocol(Distil(node_b, node_b.ports["cin_alice"], role="B", name="deutsch_B"))
@@ -210,19 +205,19 @@ class ProtectDeutsch(LocalProtocol):
                 self.subprotocols["protect_A1"].await_signal(self.subprotocols["entangle_A1"], Signals.SUCCESS))
             self.subprotocols["protect_A2"].start_expression = (
                 self.subprotocols["protect_A2"].await_signal(self.subprotocols["entangle_A2"], Signals.SUCCESS))
-            self.subprotocols["rwmeasure_B1"].start_expression = (
-                self.subprotocols["rwmeasure_B1"].await_signal(self, Signals.WAITING) |
-                self.subprotocols["rwmeasure_B1"].await_signal(self.subprotocols["protect_A1"], Signals.FAIL))
-            self.subprotocols["rwmeasure_B2"].start_expression = (
-                            self.subprotocols["rwmeasure_B2"].await_signal(self.subprotocols["entangle_A1"], Signals.SUCCESS) |
-                            self.subprotocols["rwmeasure_B2"].await_signal(self.subprotocols["protect_A2"], Signals.FAIL))
+            self.subprotocols["protect_B1"].start_expression = (
+                self.subprotocols["protect_B1"].await_signal(self, Signals.WAITING) |
+                self.subprotocols["protect_B1"].await_signal(self.subprotocols["protect_A1"], Signals.FAIL))
+            self.subprotocols["protect_B2"].start_expression = (
+                            self.subprotocols["protect_B2"].await_signal(self.subprotocols["entangle_A1"], Signals.SUCCESS) |
+                            self.subprotocols["protect_B2"].await_signal(self.subprotocols["protect_A2"], Signals.FAIL))
 
             # 精製処理プロトコルの開始条件                        
             self.subprotocols["deutsch_A"].start_expression = (
                 self.subprotocols["deutsch_A"].await_signal(self.subprotocols["protect_A2"], Signals.SUCCESS))
                                                             
             self.subprotocols["deutsch_B"].start_expression = (
-                self.subprotocols["deutsch_B"].await_signal(self.subprotocols["rwmeasure_B2"], Signals.SUCCESS))  
+                self.subprotocols["deutsch_B"].await_signal(self.subprotocols["protect_B2"], Signals.SUCCESS))  
 
             # テレポーテーションプロトコルの開始条件
             self.subprotocols["teleport_A"].start_expression = self.subprotocols["teleport_A"].await_signal(
@@ -238,15 +233,20 @@ class ProtectDeutsch(LocalProtocol):
                 start_time = sim_time()
                 self.subprotocols["entangle_A1"].entangled_pairs = 0
                 self.subprotocols["entangle_A2"].entangled_pairs = 0
+                self.subprotocols["protect_A1"].num_runs = 0
+                self.subprotocols["protect_A2"].num_runs = 0
                 self.send_signal(Signals.WAITING)
                 yield (self.await_signal(self.subprotocols["teleport_A"], Signals.SUCCESS)
                        & self.await_signal(self.subprotocols["teleport_B"], Signals.SUCCESS))
+                protect1 = self.subprotocols["protect_A1"].get_signal_result(Signals.SUCCESS, self)
+                protect2 = self.subprotocols["protect_A2"].get_signal_result(Signals.SUCCESS, self)
                 signal_A = self.subprotocols["deutsch_A"].get_signal_result(Signals.SUCCESS, self)
                 result_en = {
                     "pairs1": self.subprotocols["entangle_A1"].entangled_pairs,
                     "pairs2": self.subprotocols["entangle_A2"].entangled_pairs,
-                    "runs": signal_A[1],
-                    "time": sim_time() - start_time
+                    "runs_p1": protect1[1],
+                    "runs_p2": protect2[1],
+                    "runs_d": signal_A[1]
                 }
                 result_A = self.subprotocols["teleport_A"].get_signal_result(Signals.SUCCESS, self)
                 result_B = self.subprotocols["teleport_B"].get_signal_result(Signals.SUCCESS, self)
@@ -271,9 +271,12 @@ def sim_setup(node_a, node_b, num_runs, omega, theta):
         q_B, = node_b.qmemory.pop(positions=[result_tel["pos_B"]])
         #print(qapi.reduced_dm([q_A, q_B]))
         pairs = result_en["pairs1"] + result_en["pairs2"]
-        prob = 1 / result_en["runs"]
+        prob_pro = (result_en["runs_p1"] + result_en["runs_p2"]) / pairs
+        prob_qpa = 1.0 / result_en["runs_d"]
+        prob = prob_pro * prob_qpa
         f2 = qapi.fidelity(q_B, ks.y0, squared=True)
-        return {"fidelity": f2, "pairs": pairs, "probability": prob, "time": result_en["time"]}
+        return {"fidelity": f2, "pairs": pairs, "probability": prob,
+                "probability_protect": prob_pro, "probability_qpa": prob_qpa, "time": result_tel["time"]}
 
     dc = DataCollector(record_run, include_time_stamp=False,
                         include_entity_name=False)
@@ -343,12 +346,14 @@ def network_setup(source_delay=1e5, source_fidelity_sq=1.0, depolar_rate=200, no
     )
     return network
 
-def run_experiment(var_o, var_t):
+def run_experiment(node_distances, var_o, var_t):
     fidelity_data = pandas.DataFrame()
     for omega in var_o:
         for theta in var_t:
+            if omega == 0 and theta == 0:
+                continue
             ns.sim_reset()
-            network = network_setup()
+            network = network_setup(node_distance=node_distances)
             node_a = network.get_node("node_A")
             node_b = network.get_node("node_B")
             pro_example, dc = sim_setup(node_a, node_b, 1000, omega, theta)
@@ -360,7 +365,8 @@ def run_experiment(var_o, var_t):
             fidelity_data = pandas.concat([fidelity_data, df])
     return fidelity_data
 
-def save_heatmap(dataframe, value_col, title, colorbar_label, filename_prefix, var_o, var_t):
+def save_heatmap(dataframe, value_col, title, colorbar_label, filename_prefix,
+                 node_distance, var_o, var_t):
     data = dataframe.groupby(["omega", "theta"])[value_col].mean().reset_index()
     heatmap_data = data.pivot(index='theta', columns='omega', values=value_col)
     plt.figure(figsize=(8, 6))
@@ -374,9 +380,8 @@ def save_heatmap(dataframe, value_col, title, colorbar_label, filename_prefix, v
     plt.xlabel(r'WM strength $\omega$')
     plt.ylabel(r'WMR strength $\theta$')
     plt.title(title)
-    save_dir = "./plots_test"
-    count1 = len([f for f in os.listdir(save_dir) if f.startswith(filename_prefix)])
-    filename = f"{save_dir}/{filename_prefix}_{count1 + 1}.png"
+    save_dir = "./plots/protect-deutsch/node_distance/depolar"
+    filename = f"{save_dir}/{filename_prefix}_{node_distance}km.png"
     plt.savefig(filename)
     plt.close()
     if value_col == "fidelity":
@@ -385,48 +390,139 @@ def save_heatmap(dataframe, value_col, title, colorbar_label, filename_prefix, v
         print("Optimal value is")
         print(best_rows)
     print(f"Plot saved as {filename}")
-    count2 = len([f for f in os.listdir(save_dir)
-                if f.startswith(value_col + " summary")])
-    data[['omega', 'theta', value_col]].to_csv(f"{save_dir}/{value_col} summary_{count2 + 1}.csv")
 
 def create_plot():
     matplotlib.use('Agg')
+    node_distances = [i for i in range(10, 1000, 50)]
     var_o = [i for i in np.arange(0.0, np.pi/2, np.pi/14)]
     var_t = [i for i in np.arange(0.0, 1.0, 0.1)]
-    datas = run_experiment(var_o, var_t)
-    # 忠実度
-    save_heatmap(
-        datas,
-        value_col="fidelity",
-        title="Fidelity Heatmap with protection\n(depolar_rate=100 Hz, node_distance=10 km)",
-        colorbar_label="Average Fidelity",
-        filename_prefix="Protect&Deutsch fidelity",
-        var_o=var_o,
-        var_t=var_t
+
+    for node_distance in node_distances:
+        datas = run_experiment(node_distance, var_o, var_t)
+        # 忠実度
+        save_heatmap(
+            datas,
+            value_col="fidelity",
+            title=f"Fidelity Heatmap with protection & deutsch\n(depolar_rate=200 Hz, node_distance={node_distance} km)",
+            colorbar_label="Average Fidelity",
+            filename_prefix="Protect-Deutsch fidelity",
+            node_distance=node_distance,
+            var_o=var_o,
+            var_t=var_t
+        )
+        # 成功確率
+        save_heatmap(
+            datas,
+            value_col="probability",
+            title=f"Success Probability Heatmap with protection & deutsch\n(depolar_rate=200 Hz, node_distance={node_distance} km)",
+            colorbar_label="Average Success Probability",
+            filename_prefix="Protect-Deutsch probability",
+            node_distance=node_distance,
+            var_o=var_o,
+            var_t=var_t
+        )
+        # エンタングルメントペア消費数
+        save_heatmap(
+            datas,
+            value_col="pairs",
+            title=f"Entanglement Pair Usage Heatmap with protection & deutsch\n(depolar_rate=200 Hz, node_distance={node_distance} km)",
+            colorbar_label="Average Number of Pairs",
+            filename_prefix="Protect-Deutsch pairs",
+            node_distance=node_distance,
+            var_o=var_o,
+            var_t=var_t
+        )
+        save_dir = "./plots/protect-deutsch/node_distance/depolar"
+        datas.to_csv(f"{save_dir}/Protect-Deutsch result_{node_distance}km.csv")
+
+def run_experiment_noise(noise_rate, var_o, var_t):
+    fidelity_data = pandas.DataFrame()
+    for omega in var_o:
+        for theta in var_t:
+            if omega == 0 and theta == 0:
+                continue
+            ns.sim_reset()
+            network = network_setup(depolar_rate=noise_rate)
+            node_a = network.get_node("node_A")
+            node_b = network.get_node("node_B")
+            pro_example, dc = sim_setup(node_a, node_b, 1000, omega, theta)
+            pro_example.start()
+            ns.sim_run()
+            df = dc.dataframe
+            df['omega'] = omega
+            df['theta'] = theta
+            fidelity_data = pandas.concat([fidelity_data, df])
+    return fidelity_data
+
+def save_heatmap_noise(dataframe, value_col, title, colorbar_label, filename_prefix,
+                 noise_rate, var_o, var_t):
+    data = dataframe.groupby(["omega", "theta"])[value_col].mean().reset_index()
+    heatmap_data = data.pivot(index='theta', columns='omega', values=value_col)
+    plt.figure(figsize=(8, 6))
+    im = plt.imshow(heatmap_data, origin='lower', aspect='auto',
+                    extent=[
+                        min(var_o), max(var_o),
+                        min(var_t), max(var_t)
+                    ]
     )
-    # 成功確率
-    save_heatmap(
-        datas,
-        value_col="probability",
-        title="Success Probability Heatmap with protection\n(depolar_rate=100 Hz, node_distance=10 km)",
-        colorbar_label="Average Success Probability",
-        filename_prefix="Protect&Deutsch probability",
-        var_o=var_o,
-        var_t=var_t
-    )
-    # エンタングルメントペア消費数
-    save_heatmap(
-        datas,
-        value_col="pairs",
-        title="Entanglement Pair Usage Heatmap with protection\n(depolar_rate=100 Hz, node_distance=10 km)",
-        colorbar_label="Average Number of Pairs",
-        filename_prefix="Protect&Deutsch pairs",
-        var_o=var_o,
-        var_t=var_t
-    )
-    save_dir = "./plots_test"
-    count = len([f for f in os.listdir(save_dir) if f.startswith("Protect&Deutsch result")])
-    datas.to_csv(f"{save_dir}/Protect&Deutsch result_{count + 1}.csv")
+    plt.colorbar(im, label=colorbar_label)
+    plt.xlabel(r'WM strength $\omega$')
+    plt.ylabel(r'WMR strength $\theta$')
+    plt.title(title)
+    save_dir = "./plots/protect-deutsch/noise/depolar"
+    filename = f"{save_dir}/{filename_prefix}_{noise_rate}Hz.png"
+    plt.savefig(filename)
+    plt.close()
+    if value_col == "fidelity":
+        max_fid = data["fidelity"].max()
+        best_rows = data[data["fidelity"] == max_fid]
+        print("Optimal value is")
+        print(best_rows)
+    print(f"Plot saved as {filename}")
+
+def create_plot_noise():
+    matplotlib.use('Agg')
+    noise_rate = [i for i in range(0, 1500, 100)]
+    var_o = [i for i in np.arange(0.0, np.pi/2, np.pi/14)]
+    var_t = [i for i in np.arange(0.0, 1.0, 0.1)]
+
+    for noise in noise_rate:
+        datas = run_experiment_noise(noise, var_o, var_t)
+        # 忠実度
+        save_heatmap_noise(
+            datas,
+            value_col="fidelity",
+            title=f"Fidelity Heatmap with protection & deutsch\n(depolar_rate={noise} Hz, node_distance=200 km)",
+            colorbar_label="Average Fidelity",
+            filename_prefix="Protect-Deutsch fidelity",
+            noise_rate=noise,
+            var_o=var_o,
+            var_t=var_t
+        )
+        # 成功確率
+        save_heatmap_noise(
+            datas,
+            value_col="probability",
+            title=f"Success Probability Heatmap with protection & deutsch\n(depolar_rate={noise} Hz, node_distance=200 km)",
+            colorbar_label="Average Success Probability",
+            filename_prefix="Protect-Deutsch probability",
+            noise_rate=noise,
+            var_o=var_o,
+            var_t=var_t
+        )
+        # エンタングルメントペア消費数
+        save_heatmap_noise(
+            datas,
+            value_col="pairs",
+            title=f"Entanglement Pair Usage Heatmap with protection & deutsch\n(depolar_rate={noise} Hz, node_distance=200 km)",
+            colorbar_label="Average Number of Pairs",
+            filename_prefix="Protect-Deutsch pairs",
+            noise_rate=noise,
+            var_o=var_o,
+            var_t=var_t
+        )
+        save_dir = "./plots/protect-deutsch/noise/depolar"
+        datas.to_csv(f"{save_dir}/Protect-Deutsch result_{noise}Hz.csv")
 
 if __name__ == "__main__":
     #network = network_setup()
@@ -434,4 +530,4 @@ if __name__ == "__main__":
     #pb_example.start()
     #ns.sim_run()
     #print("Fidelity of generated entanglement: {}".format(dc.dataframe["fidelity"].mean()))
-    create_plot()
+    create_plot_noise()

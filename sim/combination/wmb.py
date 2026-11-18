@@ -500,9 +500,9 @@ class ProtectBennet(LocalProtocol):
             self.add_subprotocol(Protect(node_a, node_a.ports["cout_bob2"], omega=omega,pair_id=2, name="protect_A2"))
             self.add_subprotocol(QuantumDispatcher(node_b, node_b.ports["qdispatch_in"], name="quantum_dispatcher"))
             self.add_subprotocol(RWMeasure(node_b, node_b.ports["cin_alice1"], self.subprotocols["quantum_dispatcher"],
-                                         pair_id=1, theta=theta, name="rwmeasure_B1"))
+                                         pair_id=1, theta=theta, name="protect_B1"))
             self.add_subprotocol(RWMeasure(node_b, node_b.ports["cin_alice2"], self.subprotocols["quantum_dispatcher"],
-                                         pair_id=2, theta=theta, name="rwmeasure_B2"))
+                                         pair_id=2, theta=theta, name="protect_B2"))
             # 精製処理プロトコル
             self.add_subprotocol(Bennet(node_a, node_a.ports["cout_bob"], role="A", name="bennet_A"))
             self.add_subprotocol(Bennet(node_b, node_b.ports["cin_alice"], role="B", name="bennet_B"))
@@ -524,19 +524,19 @@ class ProtectBennet(LocalProtocol):
                 self.subprotocols["protect_A1"].await_signal(self.subprotocols["entangle_A1"], Signals.SUCCESS))
             self.subprotocols["protect_A2"].start_expression = (
                 self.subprotocols["protect_A2"].await_signal(self.subprotocols["entangle_A2"], Signals.SUCCESS))
-            self.subprotocols["rwmeasure_B1"].start_expression = (
-                self.subprotocols["rwmeasure_B1"].await_signal(self, Signals.WAITING) |
-                self.subprotocols["rwmeasure_B1"].await_signal(self.subprotocols["protect_A1"], Signals.FAIL))
-            self.subprotocols["rwmeasure_B2"].start_expression = (
-                            self.subprotocols["rwmeasure_B2"].await_signal(self.subprotocols["entangle_A1"], Signals.SUCCESS) |
-                            self.subprotocols["rwmeasure_B2"].await_signal(self.subprotocols["protect_A2"], Signals.FAIL))
+            self.subprotocols["protect_B1"].start_expression = (
+                self.subprotocols["protect_B1"].await_signal(self, Signals.WAITING) |
+                self.subprotocols["protect_B1"].await_signal(self.subprotocols["protect_A1"], Signals.FAIL))
+            self.subprotocols["protect_B2"].start_expression = (
+                            self.subprotocols["protect_B2"].await_signal(self.subprotocols["entangle_A1"], Signals.SUCCESS) |
+                            self.subprotocols["protect_B2"].await_signal(self.subprotocols["protect_A2"], Signals.FAIL))
 
             # 精製処理プロトコルの開始条件                        
             self.subprotocols["bennet_A"].start_expression = (
                 self.subprotocols["bennet_A"].await_signal(self.subprotocols["protect_A2"], Signals.SUCCESS))
                                                             
             self.subprotocols["bennet_B"].start_expression = (
-                self.subprotocols["bennet_B"].await_signal(self.subprotocols["rwmeasure_B2"], Signals.SUCCESS))  
+                self.subprotocols["bennet_B"].await_signal(self.subprotocols["protect_B2"], Signals.SUCCESS))  
 
             # テレポーテーションプロトコルの開始条件
             self.subprotocols["teleport_A"].start_expression = self.subprotocols["teleport_A"].await_signal(
@@ -666,12 +666,14 @@ def network_setup(source_delay=1e5, source_fidelity_sq=1.0, depolar_rate=200, no
     )
     return network
 
-def run_experiment(var_o, var_t):
+def run_experiment(node_distances, var_o, var_t):
     fidelity_data = pandas.DataFrame()
     for omega in var_o:
         for theta in var_t:
+            if omega == 0 and theta == 0:
+                continue
             ns.sim_reset()
-            network = network_setup()
+            network = network_setup(node_distance=node_distances)
             node_a = network.get_node("node_A")
             node_b = network.get_node("node_B")
             pro_example, dc = sim_setup(node_a, node_b, 1000, omega, theta)
@@ -683,7 +685,8 @@ def run_experiment(var_o, var_t):
             fidelity_data = pandas.concat([fidelity_data, df])
     return fidelity_data
 
-def save_heatmap(dataframe, value_col, title, colorbar_label, filename_prefix, var_o, var_t):
+def save_heatmap(dataframe, value_col, title, colorbar_label, filename_prefix,
+                 node_distance, var_o, var_t):
     data = dataframe.groupby(["omega", "theta"])[value_col].mean().reset_index()
     heatmap_data = data.pivot(index='theta', columns='omega', values=value_col)
     plt.figure(figsize=(8, 6))
@@ -697,9 +700,8 @@ def save_heatmap(dataframe, value_col, title, colorbar_label, filename_prefix, v
     plt.xlabel(r'WM strength $\omega$')
     plt.ylabel(r'WMR strength $\theta$')
     plt.title(title)
-    save_dir = "./plots_test"
-    count1 = len([f for f in os.listdir(save_dir) if f.startswith(filename_prefix)])
-    filename = f"{save_dir}/{filename_prefix}_{count1 + 1}.png"
+    save_dir = "./plots/protect-bennet/node_distance/depolar"
+    filename = f"{save_dir}/{filename_prefix}_{node_distance}km.png"
     plt.savefig(filename)
     plt.close()
     if value_col == "fidelity":
@@ -708,53 +710,144 @@ def save_heatmap(dataframe, value_col, title, colorbar_label, filename_prefix, v
         print("Optimal value is")
         print(best_rows)
     print(f"Plot saved as {filename}")
-    count2 = len([f for f in os.listdir(save_dir)
-                if f.startswith(value_col + " summary")])
-    data[['omega', 'theta', value_col]].to_csv(f"{save_dir}/{value_col} summary_{count2 + 1}.csv")
 
 def create_plot():
     matplotlib.use('Agg')
+    node_distances = [i for i in range(10, 1000, 50)]
     var_o = [i for i in np.arange(0.0, np.pi/2, np.pi/14)]
     var_t = [i for i in np.arange(0.0, 1.0, 0.1)]
-    datas = run_experiment(var_o, var_t)
-    # 忠実度
-    save_heatmap(
-        datas,
-        value_col="fidelity",
-        title="Fidelity Heatmap with protection\n(depolar_rate=100 Hz, node_distance=10 km)",
-        colorbar_label="Average Fidelity",
-        filename_prefix="Protect&Bennet fidelity",
-        var_o=var_o,
-        var_t=var_t
+
+    for node_distance in node_distances:
+        datas = run_experiment(node_distance, var_o, var_t)
+        # 忠実度
+        save_heatmap(
+            datas,
+            value_col="fidelity",
+            title=f"Fidelity Heatmap with protection & bennet\n(depolar_rate=200 Hz, node_distance={node_distance} km)",
+            colorbar_label="Average Fidelity",
+            filename_prefix="Protect-Bennet fidelity",
+            node_distance=node_distance,
+            var_o=var_o,
+            var_t=var_t
+        )
+        # 成功確率
+        save_heatmap(
+            datas,
+            value_col="probability",
+            title=f"Success Probability Heatmap with protection & bennet\n(depolar_rate=200 Hz, node_distance={node_distance} km)",
+            colorbar_label="Average Success Probability",
+            filename_prefix="Protect-Bennet probability",
+            node_distance=node_distance,
+            var_o=var_o,
+            var_t=var_t
+        )
+        # エンタングルメントペア消費数
+        save_heatmap(
+            datas,
+            value_col="pairs",
+            title=f"Entanglement Pair Usage Heatmap with protection & bennet\n(depolar_rate=200 Hz, node_distance={node_distance} km)",
+            colorbar_label="Average Number of Pairs",
+            filename_prefix="Protect-Bennet pairs",
+            node_distance=node_distance,
+            var_o=var_o,
+            var_t=var_t
+        )
+        save_dir = "./plots/protect-bennet/node_distance/depolar"
+        datas.to_csv(f"{save_dir}/Protect-Bennet result_{node_distance}km.csv")
+
+def run_experiment_noise(noise_rate, var_o, var_t):
+    fidelity_data = pandas.DataFrame()
+    for omega in var_o:
+        for theta in var_t:
+            if omega == 0 and theta == 0:
+                continue
+            ns.sim_reset()
+            network = network_setup(depolar_rate=noise_rate)
+            node_a = network.get_node("node_A")
+            node_b = network.get_node("node_B")
+            pro_example, dc = sim_setup(node_a, node_b, 1000, omega, theta)
+            pro_example.start()
+            ns.sim_run()
+            df = dc.dataframe
+            df['omega'] = omega
+            df['theta'] = theta
+            fidelity_data = pandas.concat([fidelity_data, df])
+    return fidelity_data
+
+def save_heatmap_noise(dataframe, value_col, title, colorbar_label, filename_prefix,
+                 noise_rate, var_o, var_t):
+    data = dataframe.groupby(["omega", "theta"])[value_col].mean().reset_index()
+    heatmap_data = data.pivot(index='theta', columns='omega', values=value_col)
+    plt.figure(figsize=(8, 6))
+    im = plt.imshow(heatmap_data, origin='lower', aspect='auto',
+                    extent=[
+                        min(var_o), max(var_o),
+                        min(var_t), max(var_t)
+                    ]
     )
-    # 成功確率
-    save_heatmap(
-        datas,
-        value_col="probability",
-        title="Success Probability Heatmap with protection\n(depolar_rate=100 Hz, node_distance=10 km)",
-        colorbar_label="Average Success Probability",
-        filename_prefix="Protect&Bennet probability",
-        var_o=var_o,
-        var_t=var_t
-    )
-    # エンタングルメントペア消費数
-    save_heatmap(
-        datas,
-        value_col="pairs",
-        title="Entanglement Pair Usage Heatmap with protection\n(depolar_rate=100 Hz, node_distance=10 km)",
-        colorbar_label="Average Number of Pairs",
-        filename_prefix="Protect&Bennet pairs",
-        var_o=var_o,
-        var_t=var_t
-    )
-    save_dir = "./plots_test"
-    count = len([f for f in os.listdir(save_dir) if f.startswith("Protect&Bennet result")])
-    datas.to_csv(f"{save_dir}/Protect&Bennet result_{count + 1}.csv")
+    plt.colorbar(im, label=colorbar_label)
+    plt.xlabel(r'WM strength $\omega$')
+    plt.ylabel(r'WMR strength $\theta$')
+    plt.title(title)
+    save_dir = "./plots/protect-bennet/noise/depolar"
+    filename = f"{save_dir}/{filename_prefix}_{noise_rate}Hz.png"
+    plt.savefig(filename)
+    plt.close()
+    if value_col == "fidelity":
+        max_fid = data["fidelity"].max()
+        best_rows = data[data["fidelity"] == max_fid]
+        print("Optimal value is")
+        print(best_rows)
+    print(f"Plot saved as {filename}")
+
+def create_plot_noise():
+    matplotlib.use('Agg')
+    noise_rate = [i for i in range(0, 1500, 100)]
+    var_o = [i for i in np.arange(0.0, np.pi/2, np.pi/14)]
+    var_t = [i for i in np.arange(0.0, 1.0, 0.1)]
+
+    for noise in noise_rate:
+        datas = run_experiment_noise(noise, var_o, var_t)
+        # 忠実度
+        save_heatmap_noise(
+            datas,
+            value_col="fidelity",
+            title=f"Fidelity Heatmap with protection & bennet\n(depolar_rate={noise} Hz, node_distance=200 km)",
+            colorbar_label="Average Fidelity",
+            filename_prefix="Protect-Bennet fidelity",
+            noise_rate=noise,
+            var_o=var_o,
+            var_t=var_t
+        )
+        # 成功確率
+        save_heatmap_noise(
+            datas,
+            value_col="probability",
+            title=f"Success Probability Heatmap with protection & bennet\n(depolar_rate={noise} Hz, node_distance=200 km)",
+            colorbar_label="Average Success Probability",
+            filename_prefix="Protect-Bennet probability",
+            noise_rate=noise,
+            var_o=var_o,
+            var_t=var_t
+        )
+        # エンタングルメントペア消費数
+        save_heatmap_noise(
+            datas,
+            value_col="pairs",
+            title=f"Entanglement Pair Usage Heatmap with protection & bennet\n(depolar_rate={noise} Hz, node_distance=200 km)",
+            colorbar_label="Average Number of Pairs",
+            filename_prefix="Protect-Bennet pairs",
+            noise_rate=noise,
+            var_o=var_o,
+            var_t=var_t
+        )
+        save_dir = "./plots/protect-bennet/noise/depolar"
+        datas.to_csv(f"{save_dir}/Protect-Bennet result_{noise}Hz.csv")
 
 if __name__ == "__main__":
-    network = network_setup()
-    pb_example, dc = sim_setup(network.get_node("node_A"), network.get_node("node_B"), 1, np.pi/3, 0.2)
-    pb_example.start()
-    ns.sim_run()
-    print("Fidelity of generated entanglement: {}".format(dc.dataframe["fidelity"].mean()))
-    #create_plot()
+    # network = network_setup()
+    # pb_example, dc = sim_setup(network.get_node("node_A"), network.get_node("node_B"), 1, np.pi/3, 0.2)
+    # pb_example.start()
+    # ns.sim_run()
+    # print("Fidelity of generated entanglement: {}".format(dc.dataframe["fidelity"].mean()))
+    create_plot_noise()

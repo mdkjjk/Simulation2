@@ -308,7 +308,7 @@ class RWMeasure(NodeProtocol):   # Bob側のプロトコル
         self._qmem_pos = [None] * len(self._qmem_pos)
 
         
-def network_setup(source_delay=1e5, source_fidelity_sq=1.0, damp_rate=200, node_distance=200):
+def network_setup(source_delay=1e5, source_fidelity_sq=1.0, damp_rate=100, node_distance=200):
     network = Network("wmeasure_network")
 
     # ノード設定
@@ -333,7 +333,7 @@ def network_setup(source_delay=1e5, source_fidelity_sq=1.0, damp_rate=200, node_
     # "quantum_noise_model": AmplitudeNoiseModel(gamma=damp_rate, time_independent=False)
     # "quantum_noise_model": PhaseNoiseModel(gamma=damp_rate, time_independent=False)
     qchannel = QuantumChannel("QChannel_A->B", length=node_distance,
-                              models={"quantum_noise_model": AmplitudeNoiseModel(gamma=damp_rate, time_independent=False),
+                              models={"quantum_noise_model": PhaseNoiseModel(gamma=damp_rate, time_independent=False),
                                       "delay_model": FibreDelayModel(c=200e3)})
     network.add_connection(node_a, node_b, channel_to=qchannel, label="quantum",
                            port_name_node1="qout_bob", port_name_node2="qin_alice")
@@ -461,7 +461,7 @@ def save_heatmap(dataframe, value_col, title, colorbar_label, filename_prefix,
     plt.xlabel(r'WM strength $\omega$')
     plt.ylabel(r'WMR strength $\theta$')
     plt.title(title)
-    save_dir = "./plots/protect/node_distance/amplitude"
+    save_dir = "./plots/protect/node_distance/phase"
     filename = f"{save_dir}/{filename_prefix}_{node_distance}km.png"
     plt.savefig(filename)
     plt.close()
@@ -484,7 +484,7 @@ def create_plot():
         save_heatmap(
             datas,
             value_col="fidelity",
-            title=f"Fidelity Heatmap with protection\n(amplitude_damp_rate=200 Hz, node_distance={node_distance} km)",
+            title=f"Fidelity Heatmap with protection\n(phase_damp_rate=100 Hz, node_distance={node_distance} km)",
             colorbar_label="Average Fidelity",
             filename_prefix="Protect fidelity",
             node_distance=node_distance,
@@ -495,7 +495,7 @@ def create_plot():
         save_heatmap(
             datas,
             value_col="probability",
-            title=f"Success Probability Heatmap with protection\n(amplitude_damp_rate=200 Hz, node_distance={node_distance} km)",
+            title=f"Success Probability Heatmap with protection\n(phase_damp_rate=100 Hz, node_distance={node_distance} km)",
             colorbar_label="Average Success Probability",
             filename_prefix="Protect probability",
             node_distance=node_distance,
@@ -506,14 +506,14 @@ def create_plot():
         save_heatmap(
             datas,
             value_col="pairs",
-            title=f"Entanglement Pair Usage Heatmap with protection\n(amplitude_damp_rate=200 Hz, node_distance={node_distance} km)",
+            title=f"Entanglement Pair Usage Heatmap with protection\n(phase_damp_rate=100 Hz, node_distance={node_distance} km)",
             colorbar_label="Average Number of Pairs",
             filename_prefix="Protect pairs",
             node_distance=node_distance,
             var_o=var_o,
             var_t=var_t
         )
-        save_dir = "./plots/protect/node_distance/amplitude"
+        save_dir = "./plots/protect/node_distance/phase"
         datas.to_csv(f"{save_dir}/Protect result_{node_distance}km.csv")
 
 def run_experiment_noise(noise_rate, var_o, var_t):
@@ -550,7 +550,7 @@ def save_heatmap_noise(dataframe, value_col, title, colorbar_label, filename_pre
     plt.xlabel(r'WM strength $\omega$')
     plt.ylabel(r'WMR strength $\theta$')
     plt.title(title)
-    save_dir = "./plots/protect/noise/amplitude"
+    save_dir = "./plots/protect/noise/phase"
     filename = f"{save_dir}/{filename_prefix}_{noise_rate}Hz.png"
     plt.savefig(filename)
     plt.close()
@@ -573,7 +573,7 @@ def create_plot_noise():
         save_heatmap_noise(
             datas,
             value_col="fidelity",
-            title=f"Fidelity Heatmap with protection\n(amplitude_damp_rate={noise} Hz, node_distance=200 km)",
+            title=f"Fidelity Heatmap with protection\n(phase_damp_rate={noise} Hz, node_distance=200 km)",
             colorbar_label="Average Fidelity",
             filename_prefix="Protect fidelity",
             noise_rate=noise,
@@ -584,7 +584,7 @@ def create_plot_noise():
         save_heatmap_noise(
             datas,
             value_col="probability",
-            title=f"Success Probability Heatmap with protection\n(amplitude_damp_rate={noise} Hz, node_distance=200 km)",
+            title=f"Success Probability Heatmap with protection\n(phase_damp_rate={noise} Hz, node_distance=200 km)",
             colorbar_label="Average Success Probability",
             filename_prefix="Protect probability",
             noise_rate=noise,
@@ -595,14 +595,14 @@ def create_plot_noise():
         save_heatmap_noise(
             datas,
             value_col="pairs",
-            title=f"Entanglement Pair Usage Heatmap with protection\n(amplitude_damp_rate={noise} Hz, node_distance=200 km)",
+            title=f"Entanglement Pair Usage Heatmap with protection\n(phase_damp_rate={noise} Hz, node_distance=200 km)",
             colorbar_label="Average Number of Pairs",
             filename_prefix="Protect pairs",
             noise_rate=noise,
             var_o=var_o,
             var_t=var_t
         )
-        save_dir = "./plots/protect/noise/amplitude"
+        save_dir = "./plots/protect/noise/phase"
         datas.to_csv(f"{save_dir}/Protect result_{noise}Hz.csv")
 
 if __name__ == "__main__":
@@ -613,4 +613,4 @@ if __name__ == "__main__":
     # print("Average fidelity of generated entanglement with protection: {}".format(dc.dataframe["fidelity"].mean()))
     #print("Average resource with protection: {}".format(dc.dataframe["pairs"].mean()))
     #print("Average probability of success with protection: {}".format(dc.dataframe["probability"].mean()))
-    create_plot_noise()
+    create_plot()
