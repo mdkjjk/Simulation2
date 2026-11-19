@@ -603,7 +603,7 @@ def sim_setup(node_a, node_b, num_runs, omega, theta):
                                         event_type=Signals.SUCCESS.value))
     return pb_example, dc
 
-def network_setup(source_delay=1e5, source_fidelity_sq=1.0, depolar_rate=200, node_distance=200):
+def network_setup(source_delay=1e5, source_fidelity_sq=1.0, damp_rate=100, node_distance=200):
     network = Network("wmeasure_network")
 
     # ノード設定
@@ -642,7 +642,7 @@ def network_setup(source_delay=1e5, source_fidelity_sq=1.0, depolar_rate=200, no
     # "quantum_noise_model": AmplitudeNoiseModel(gamma=damp_rate, time_independent=False)
     # "quantum_noise_model": PhaseNoiseModel(gamma=damp_rate, time_independent=False)
     qchannel = QuantumChannel("QChannel_A->B", length=node_distance,
-                              models={"quantum_noise_model": DepolarNoiseModel(depolar_rate=depolar_rate, time_independent=False),
+                              models={"quantum_noise_model": PhaseNoiseModel(gamma=damp_rate, time_independent=False),
                                       "delay_model": FibreDelayModel(c=200e3)})
     network.add_connection(node_a, node_b, channel_to=qchannel, label="quantum",
                            port_name_node1="qout_bob", port_name_node2="qin_alice")
@@ -700,7 +700,7 @@ def save_heatmap(dataframe, value_col, title, colorbar_label, filename_prefix,
     plt.xlabel(r'WM strength $\omega$')
     plt.ylabel(r'WMR strength $\theta$')
     plt.title(title)
-    save_dir = "./plots/protect-bennet/node_distance/depolar"
+    save_dir = "./plots/protect-bennet/node_distance/phase"
     filename = f"{save_dir}/{filename_prefix}_{node_distance}km.png"
     plt.savefig(filename)
     plt.close()
@@ -723,7 +723,7 @@ def create_plot():
         save_heatmap(
             datas,
             value_col="fidelity",
-            title=f"Fidelity Heatmap with protection & bennet\n(depolar_rate=200 Hz, node_distance={node_distance} km)",
+            title=f"Fidelity Heatmap with protection & bennet\n(phase_damp_rate=100 Hz, node_distance={node_distance} km)",
             colorbar_label="Average Fidelity",
             filename_prefix="Protect-Bennet fidelity",
             node_distance=node_distance,
@@ -734,7 +734,7 @@ def create_plot():
         save_heatmap(
             datas,
             value_col="probability",
-            title=f"Success Probability Heatmap with protection & bennet\n(depolar_rate=200 Hz, node_distance={node_distance} km)",
+            title=f"Success Probability Heatmap with protection & bennet\n(phase_damp_rate=100 Hz, node_distance={node_distance} km)",
             colorbar_label="Average Success Probability",
             filename_prefix="Protect-Bennet probability",
             node_distance=node_distance,
@@ -745,14 +745,14 @@ def create_plot():
         save_heatmap(
             datas,
             value_col="pairs",
-            title=f"Entanglement Pair Usage Heatmap with protection & bennet\n(depolar_rate=200 Hz, node_distance={node_distance} km)",
+            title=f"Entanglement Pair Usage Heatmap with protection & bennet\n(phase_damp_rate=100 Hz, node_distance={node_distance} km)",
             colorbar_label="Average Number of Pairs",
             filename_prefix="Protect-Bennet pairs",
             node_distance=node_distance,
             var_o=var_o,
             var_t=var_t
         )
-        save_dir = "./plots/protect-bennet/node_distance/depolar"
+        save_dir = "./plots/protect-bennet/node_distance/phase"
         datas.to_csv(f"{save_dir}/Protect-Bennet result_{node_distance}km.csv")
 
 def run_experiment_noise(noise_rate, var_o, var_t):
@@ -762,7 +762,7 @@ def run_experiment_noise(noise_rate, var_o, var_t):
             if omega == 0 and theta == 0:
                 continue
             ns.sim_reset()
-            network = network_setup(depolar_rate=noise_rate)
+            network = network_setup(damp_rate=noise_rate)
             node_a = network.get_node("node_A")
             node_b = network.get_node("node_B")
             pro_example, dc = sim_setup(node_a, node_b, 1000, omega, theta)
@@ -789,7 +789,7 @@ def save_heatmap_noise(dataframe, value_col, title, colorbar_label, filename_pre
     plt.xlabel(r'WM strength $\omega$')
     plt.ylabel(r'WMR strength $\theta$')
     plt.title(title)
-    save_dir = "./plots/protect-bennet/noise/depolar"
+    save_dir = "./plots/protect-bennet/noise/phase"
     filename = f"{save_dir}/{filename_prefix}_{noise_rate}Hz.png"
     plt.savefig(filename)
     plt.close()
@@ -812,7 +812,7 @@ def create_plot_noise():
         save_heatmap_noise(
             datas,
             value_col="fidelity",
-            title=f"Fidelity Heatmap with protection & bennet\n(depolar_rate={noise} Hz, node_distance=200 km)",
+            title=f"Fidelity Heatmap with protection & bennet\n(phase_damp_rate={noise} Hz, node_distance=200 km)",
             colorbar_label="Average Fidelity",
             filename_prefix="Protect-Bennet fidelity",
             noise_rate=noise,
@@ -823,7 +823,7 @@ def create_plot_noise():
         save_heatmap_noise(
             datas,
             value_col="probability",
-            title=f"Success Probability Heatmap with protection & bennet\n(depolar_rate={noise} Hz, node_distance=200 km)",
+            title=f"Success Probability Heatmap with protection & bennet\n(phase_damp_rate={noise} Hz, node_distance=200 km)",
             colorbar_label="Average Success Probability",
             filename_prefix="Protect-Bennet probability",
             noise_rate=noise,
@@ -834,14 +834,14 @@ def create_plot_noise():
         save_heatmap_noise(
             datas,
             value_col="pairs",
-            title=f"Entanglement Pair Usage Heatmap with protection & bennet\n(depolar_rate={noise} Hz, node_distance=200 km)",
+            title=f"Entanglement Pair Usage Heatmap with protection & bennet\n(phase_damp_rate={noise} Hz, node_distance=200 km)",
             colorbar_label="Average Number of Pairs",
             filename_prefix="Protect-Bennet pairs",
             noise_rate=noise,
             var_o=var_o,
             var_t=var_t
         )
-        save_dir = "./plots/protect-bennet/noise/depolar"
+        save_dir = "./plots/protect-bennet/noise/phase"
         datas.to_csv(f"{save_dir}/Protect-Bennet result_{noise}Hz.csv")
 
 if __name__ == "__main__":
