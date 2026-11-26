@@ -9,23 +9,32 @@ matplotlib.use("Agg")
 # 設定
 # ==================================================
 
-BASE_DIR = Path("./plots_test")
+BASE_DIR = Path("./combination/plots")
 
-# プロトコル
+# プロトコルと読み込むCSVファイル名
 PROTOCOLS = {
     "bennet": "Bennet result_1.csv",
     "deutsch": "Deutsch result_1.csv",
-    "filter": "Filter result_1.csv",
-    "protect": "Protect_summary.csv",
-    "standard": "Teleportation result_1.csv"
+    "filter": "Filter summary.csv",
+    "filter-bennet": "Filter-Bennet summary.csv",
+    "filter-deutsch": "Filter-Deutsch summary.csv",
+    "original": "Teleportation result_1.csv",
+    "protect": "protect summary.csv",
+    "protect-bennet": "protect-bennet summary.csv",
+    "protect-deutsch": "protect-deutsch summary.csv"
 }
 
+# グラフの凡例に表示する名前
 LABEL = {
-    "bennet": "Non-breeding",
+    "bennet": "Recurrence",
     "deutsch": "QPA",
     "filter": "Filter",
+    "filter-bennet": "Filter-Bennet",
+    "filter-deutsch": "Filter-QPA",
+    "original": "Srandard",
     "protect": "WMFR",
-    "standard": "Standard"
+    "protect-bennet": "WMFR-Recurrence",
+    "protect-deutsch": "WMFR-QPA"
 }
 
 # ノイズ
@@ -35,88 +44,77 @@ NOISES = [
     "phase"
 ]
 
-# ノイズごとのサブフォルダ
-SUB_DIR = {
-    "amplitude": "500",
-    "depolar": None,
-    "phase": None
-}
+# node_distanceごとに平均値を計算するプロトコル
+AVERAGE_PROTOCOLS = [
+    "bennet",
+    "deutsch",
+    "original"
+]
 
-# 評価指標
-PARAMETER = {
-    "fidelity": "Fidelity",
-    "pairs": "Pairs",
-    "probability": "Probability",
-    "time": "Time [ns]"
-}
-
+# グラフの保存先
 SAVE_DIR = BASE_DIR / "comparison"
 
+
 # ==================================================
-# 関数
+# CSV読み込み
+# ==================================================
+
+def load_csv(protocol, filename, noise):
+    """
+    CSVファイルを読み込む
+    """
+
+    path = (
+        BASE_DIR
+        / protocol
+        / "node_distance"
+        / noise
+        / filename
+    )
+
+    df = pd.read_csv(path)
+
+    # CSV保存時に追加された行番号の列を削除
+    unnamed_columns = [
+        column for column in df.columns
+        if str(column).startswith("Unnamed:")
+    ]
+
+    df = df.drop(columns=unnamed_columns)
+    
+    return df
+
+
+# ==================================================
+# 統計処理
 # ==================================================
 
 def calc_statistics(df, protocol):
-    """node_distanceごとの平均と標準誤差を計算"""
+    """
+    node_distanceごとの平均値を計算する
 
-    if protocol == "filter":
+    result_1.csv：
+        node_distanceごとに数値列の平均値を計算
+
+    summary.csv：
+        すでに集計されたデータをそのまま使用
+    """
+
+    if protocol in AVERAGE_PROTOCOLS:
+
         summary = (
-            df.groupby(["node_distance", "epsilon"])
-            .agg(
-                fidelity=("fidelity", "mean"),
-                pairs=("pairs", "mean"),
-                probability=("probability", "mean"),
-                time=("time", "mean")
-            )
-            .reset_index()
-        )
-        best_rows = summary.loc[summary.groupby("node_distance")["fidelity"].idxmax()]
-        best_rows = best_rows.sort_values("node_distance")
-        return best_rows
-    elif protocol == "standard":
-        return (
             df.groupby("node_distance")
-            .agg(
-                fidelity=("fidelity", "mean"),
-                time=("time", "mean")
-            )
-            .reset_index()
-        )
-    else: 
-        return (
-            df.groupby("node_distance")
-            .agg(
-                fidelity=("fidelity", "mean"),
-                pairs=("pairs", "mean"),
-                probability=("probability", "mean"),
-                time=("time", "mean")
-            )
+            .mean(numeric_only=True)
             .reset_index()
         )
 
-
-def load_csv(protocol, filename, noise):
-    """CSVを読み込む"""
-
-    if SUB_DIR[noise] is None:
-        path = (
-            BASE_DIR
-            / protocol
-            / "node_distance"
-            / noise
-            / filename
-        )
     else:
-        path = (
-            BASE_DIR
-            / protocol
-            / "node_distance"
-            / noise
-            / SUB_DIR[noise]
-            / filename
+        summary = (
+            df.sort_values("node_distance")
+            .reset_index(drop=True)
         )
 
-    return pd.read_csv(path)
+    return summary
 
 
 # ==================================================
@@ -125,35 +123,130 @@ def load_csv(protocol, filename, noise):
 
 for noise in NOISES:
 
-    plt.figure(figsize=(8, 6))
+    print(f"\n===== {noise.upper()} =====")
 
-    for column, ylabel in PARAMETER.items():
-        for protocol, filename in PROTOCOLS.items():
-            if protocol == "standard" and column in ("pairs", "probability"):
-                continue 
-            df = load_csv(protocol, filename, noise)
-            data = calc_statistics(df, protocol)
+    # プロトコルごとの集計データを格納
+    data_dict = {}
 
-            plt.errorbar(
-                data["node_distance"],
-                data[column],
+    # ----------------------------------------------
+    # 各プロトコルのCSV読み込み・集計
+    # ----------------------------------------------
+
+    for protocol, filename in PROTOCOLS.items():
+
+        print(f"\n--- {protocol} ---")
+
+        try:
+            df = load_csv(
+                protocol,
+                filename,
+                noise
+            )
+
+        except FileNotFoundError:
+            print(f"CSV not found : {protocol} ({noise})")
+            continue
+
+        # node_distanceごとの統計処理
+        data = calc_statistics(df, protocol)
+
+        data_dict[protocol] = data
+
+    if len(data_dict) == 0:
+        print("No data.")
+        continue
+
+    # ----------------------------------------------
+    # グラフ化する列を取得
+    # ----------------------------------------------
+
+    # 全プロトコルに存在する数値列を収集
+    parameters = set()
+
+    for data in data_dict.values():
+
+        for column in data.columns:
+
+            if column == "node_distance":
+                continue
+
+            if pd.api.types.is_numeric_dtype(data[column]):
+                parameters.add(column)
+
+    # ----------------------------------------------
+    # 列ごとにグラフを作成
+    # ----------------------------------------------
+
+    for column in sorted(parameters):
+
+        plt.figure(figsize=(8, 6))
+
+        plotted = False
+
+        for protocol, data in data_dict.items():
+
+            # 対象の列が存在しない場合はスキップ
+            if column not in data.columns:
+                continue
+
+            # 欠損値を除外
+            plot_data = data[
+                ["node_distance", column]
+            ].dropna()
+
+            if plot_data.empty:
+                continue
+
+            plt.plot(
+                plot_data["node_distance"],
+                plot_data[column],
                 marker="o",
-                capsize=3,
                 linewidth=2,
                 label=LABEL[protocol]
             )
 
-        plt.xlabel("Node distance")
-        plt.ylabel(ylabel)
-        plt.title(f"{ylabel} comparison\n{noise}")
+            plotted = True
+
+        if not plotted:
+            plt.close()
+            continue
+
+        plt.xlabel("Node distance [km]")
+        plt.ylabel(column)
+
+        plt.title(
+            f"{column} comparison\n{noise}"
+        )
+
         plt.grid(True)
         plt.legend()
+        plt.tight_layout()
 
-        save_path = SAVE_DIR / f"node_distance/{noise}/{noise}_{column}.png"
+        # 保存先ディレクトリを作成
+        save_dir = (
+            SAVE_DIR
+            / "node_distance"
+            / noise
+        )
 
-        plt.savefig(save_path, dpi=300)
+        save_dir.mkdir(
+            parents=True,
+            exist_ok=True
+        )
+
+        save_path = (
+            save_dir / f"{column}.png"
+        )
+
+        plt.savefig(
+            save_path,
+            dpi=300
+        )
+
         plt.close()
 
+        print("\n--------------------")
         print(f"Saved : {save_path}")
 
-print("Finished.")
+
+print("\nFinished.")
