@@ -54,6 +54,32 @@ AVERAGE_PROTOCOLS = [
 # グラフの保存先
 SAVE_DIR = BASE_DIR / "comparison"
 
+# プロトコルごとの線種
+LINE_STYLES = {
+    "bennet": "-",
+    "deutsch": "--",
+    "filter": "-.",
+    "filter-bennet": ":",
+    "filter-deutsch": "--",
+    "original": "-",
+    "protect": ":",
+    "protect-bennet": "-.",
+    "protect-deutsch": "--"
+}
+
+# プロトコルごとのマーカー
+MARKERS = {
+    "bennet": "o",
+    "deutsch": "s",
+    "filter": "^",
+    "filter-bennet": "D",
+    "filter-deutsch": "v",
+    "original": "P",
+    "protect": "X",
+    "protect-bennet": "*",
+    "protect-deutsch": "h"
+}
+
 
 # ==================================================
 # CSV読み込み
@@ -200,9 +226,15 @@ for noise in NOISES:
             plt.plot(
                 plot_data["node_distance"],
                 plot_data[column],
-                marker="o",
+                linestyle=LINE_STYLES[protocol],
+                marker=MARKERS[protocol],
+                markersize=6,
+                markerfacecolor="white",
+                markeredgewidth=1.5,
+                markevery=2,
                 linewidth=2,
-                label=LABEL[protocol]
+                label=LABEL[protocol],
+                zorder=2
             )
 
             plotted = True
